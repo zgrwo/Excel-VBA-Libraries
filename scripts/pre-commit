@@ -1,0 +1,17 @@
+#!/bin/bash
+# Git pre-commit hook — check new files against agents.md project structure.
+#
+# Installed by: bash scripts/install_hooks.sh
+# Requires: Python 3 (for structure parser)
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+CHECKER="$REPO_ROOT/scripts/check_project_structure.py"
+
+if [ ! -f "$CHECKER" ]; then
+    echo "WARNING: check_project_structure.py not found — skipping structure check" >&2
+    exit 0
+fi
+
+python "$CHECKER"
+exit $?

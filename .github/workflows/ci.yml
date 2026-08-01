@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  validate:
+    name: Static Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run full static validation (4 layers)
+        run: python tests/run_all_validation.py
+      - name: VBA lint (8 rules)
+        run: python scripts/vba_lint.py --summary
+      - name: Validate manual anchors
+        run: python tests/utils/validate_manual_anchors.py

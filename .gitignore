@@ -1,0 +1,30 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# CodeGraph index (machine-local)
+/.codegraph/
+
+# VBA text backups (workspace-local)
+txt/
+
+# Translation tools (workspace-local)
+tools/
+
+# Excel test data files (local, not tracked)
+tests/data/*.xls*
+
+# Generated benchmark results
+tests/benchmarks/bench_results.json
+
+# Code review artifacts (workspace-local, not tracked)
+docs/code-review-prompt.md
+docs/review-checklist.md
+.claude/
+
+# IDE / OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db

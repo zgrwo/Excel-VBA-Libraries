@@ -1,0 +1,32 @@
+# Normalize line endings for cross-platform consistency
+
+# VBA source — text, CRLF for Windows/Excel compatibility
+*.bas text eol=crlf
+*.cls text eol=crlf
+*.frm text eol=crlf
+
+# Documentation — text, LF (rendered on web)
+*.md text eol=lf
+*.txt text eol=lf
+
+# Python — text, LF
+*.py text eol=lf
+
+# Shell scripts — text, LF
+*.sh text eol=lf
+*.bash text eol=lf
+
+# YAML/JSON configs — text, LF
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+
+# Binary files — no conversion
+*.xlsm binary
+*.xlam binary
+*.xlsx binary
+*.xls binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.db binary

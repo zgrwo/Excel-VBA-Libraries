@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rubberduck-vba/Rubberduck/develop/Rubberduck.Settings/rubberduck-settings-schema.json",
+  "GeneralSettings": {
+    "Language": "en",
+    "ShowRubberduckCommandbar": true
+  },
+  "CodeInspectionSettings": {
+    "SeverityOverrides": {
+      "UseMeaningfulName": "Suggestion",
+      "EmptyStringHandling": "Suggestion",
+      "ImplicitDefaultReturnType": "Warning",
+      "UnusedDeclaration": "Suggestion",
+      "FunctionNotUsed": "DoNotShow",
+      "ParameterNotUsed": "DoNotShow",
+      "VariableNotUsed": "Warning"
+    }
+  },
+  "RubberduckExtensions": {
+    "ExportActiveCodePane": true
+  },
+  "RecommendedAnnotations": {
+    "@Folder": "Organize modules by domain (Data/Statistics/Text/DateTime/Excel/Science/Core)",
+    "@Description": "One-line description for each Public function",
+    "@Ignore": "Suppress specific false-positive inspections"
+  },
+  "Notes": {
+    "purpose": "Recommended Rubberduck VBA configuration for Excel-VBA-Libraries",
+    "installation": "Optional. Install from https://rubberduckvba.com/ and import this config.",
+    "not_required": "This project does NOT require Rubberduck to build or test."
+  }
+}
