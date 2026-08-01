@@ -2,9 +2,17 @@
 
 All notable changes to Excel VBA Libraries.
 
-## [Unreleased]
+## [2.1.0] — 2026-08-01
 
 ### Fixed
+
+- **StatsUtils**: TTest Case 2/3 添加 se=0 除零守卫；ZTest 添加 sigma≤0 校验；HarmonicMean 拒绝负值
+- **StatsUtils**: GeometricMean/TrimMean/MeanAbsDev 添加 Kahan 补偿求和
+- **StatsUtils**: RankAvg ties 判定改为相对容差
+- **SqlUtils**: SqlEscapeString 补充 `]` LIKE 转义；EscapeSheetName 验证方括号配对
+- **SqlUtils**: SqlJoin joinType 白名单校验；连接字符串路径追加双引号拦截
+
+### Changed
 
 - api-reference.md 计数同步（33 Subs / 565 总计）
 - README 验证示例修正为实际函数名 `Mean`

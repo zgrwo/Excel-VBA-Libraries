@@ -2,7 +2,7 @@
 
 High-performance VBA function library for Excel — array operations, statistical analysis, matrix computation, string processing, and data structure transformation.
 
-**Version 2.0.0** | ✅ All Tests Passed | All Modules | [中文](README.md)
+**Version 2.1.0** | ✅ All Tests Passed | All Modules | [中文](README.md)
 
 ## When to Use
 
