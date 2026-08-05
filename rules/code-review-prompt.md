@@ -37,7 +37,7 @@ Agents 返回后，主审查者应**逐条复核**所有 Critical/High 发现（
 - **错误处理约定**：UDF 路径返回 CVErr；VBA 函数路径 Err.Raise；资源路径用 Cleanup 标签释放
 - **数值稳定性要求**：Kahan 补偿求和、QR 替代正规方程、双重方差
 - **测试体系**：4 层（一致性验证 / 交叉验证 numpy+scipy / 集成测试 Range 路径 / SqlUtils 单元测试），双路径原则必须同时通过
-- **项目宪法**：agents.md；编码规范在 skills/vba-SKILL.md、skills/python-SKILL.md、skills/sql-SKILL.md、skills/vba-manual-authoring.md
+- **项目宪法**：AGENTS.md；编码规范在 skills/vba-SKILL.md、skills/python-SKILL.md、skills/sql-SKILL.md、skills/vba-manual-authoring.md
 - **红线**：禁止改 VBA-Core Public 接口；git push 需用户同意；禁止推送结构外文件；新增 Public 函数须同步 6 处文档
 - **已知环境约束**：64 位 Office 使用 SqlUtils 需 Access Database Engine 2016
 

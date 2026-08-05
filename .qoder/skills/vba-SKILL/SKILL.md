@@ -888,12 +888,12 @@ Dependent modules must appear before their dependents in the VBA project.
 
 - Mark internal functions `Private` — only `Public` functions become UDFs.
 - Provide thin `Public` wrappers with CVErr for any function that needs cell exposure.
-- Testing architecture and run commands → [AGENTS.md](../../AGENTS.md).
+- Testing architecture and run commands → [AGENTS.md](../../../AGENTS.md).
 - Module headers must list all public functions, dependencies, and limitations.
 
 ## 13. User Manual Authoring
 
-完整手册撰写规范见 [manual-authoring.md](manual-authoring.md)。
+完整手册撰写规范见 [manual-authoring.md](../vba-manual-authoring/SKILL.md)。
 
 ## 14. VBA-Core — Shared Infrastructure Classes
 
@@ -941,7 +941,7 @@ Set dict = DP.Create()                  ' Safe dictionary (vbTextCompare default
 
 ## 15. Related Skills
 
-其他 Skill 文件及文档的加载时机见 [AGENTS.md](../../AGENTS.md) 文档路由表。
+其他 Skill 文件及文档的加载时机见 [AGENTS.md](../../../AGENTS.md) 文档路由表。
 
 ## 16. Error Handling Patterns
 

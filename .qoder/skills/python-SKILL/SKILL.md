@@ -316,4 +316,4 @@ Each module has a `build_*.py` that follows this structure:
 
 ## 9. Related Skills
 
-其他 Skill 文件及文档的加载时机见 [AGENTS.md](../../AGENTS.md) 文档路由表。
+其他 Skill 文件及文档的加载时机见 [AGENTS.md](../../../AGENTS.md) 文档路由表。

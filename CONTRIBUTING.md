@@ -93,7 +93,7 @@ A maintainer will review your PR. CI checks must pass before merge.
 
 ## Project Structure
 
-See [agents.md](agents.md) for the full module map and dependency graph.
+See [AGENTS.md](AGENTS.md) for the full module map and dependency graph.
 
 ## Questions?
 

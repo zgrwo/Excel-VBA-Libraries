@@ -244,4 +244,4 @@ sql = "SELECT * FROM [Data$] WHERE Name = '" & userInput & "'"
 
 ## 11. Related Skills
 
-其他 Skill 文件及文档的加载时机见 [AGENTS.md](../../AGENTS.md) 文档路由表。
+其他 Skill 文件及文档的加载时机见 [AGENTS.md](../../../AGENTS.md) 文档路由表。

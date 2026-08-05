@@ -22,6 +22,9 @@ docs/code-review-prompt.md
 docs/review-checklist.md
 .claude/
 
+# Better Harness report output (workspace-local, not tracked)
+.qoder/better-harness/
+
 # IDE / OS files
 .vscode/
 .idea/

@@ -100,9 +100,12 @@ ExcelVBA函数库/
 │   └── reviews/
 │       ├── CODE_REVIEW_KNOWN_ISSUES.md  # 已知问题注册表
 │       └── CODE_REVIEW_VERIFICATION_*.md # 审查复核记录
+├── .qoder/                         # Qoder 代理配置
+│   └── skills/                     # Harness 可识别的技能注册（skills/ 的镜像）
+│       └── */SKILL.md              # 每个技能一个目录，文件名必须为 SKILL.md
 ├── build/                          # 构建产出（.gitignore）
 ├── logs/                           # 日志（.gitignore）
-├── agents.md                       # 项目宪法（AI 入口）
+├── AGENTS.md                       # 项目宪法（AI 入口）
 ├── README.md                       # 用户入口·中文
 ├── README_EN.md                    # 用户入口·英文
 ├── LICENSE                         # MIT 许可证
@@ -198,7 +201,7 @@ Git hooks 和自动化脚本，由提交钩子直接调用。
 
 | 文件 | 角色 |
 |------|------|
-| `agents.md` | 项目宪法（AI 入口），仅保留一级路由 |
+| `AGENTS.md` | 项目宪法（AI 入口），仅保留一级路由 |
 | `README.md` | 用户入口·中文 |
 | `README_EN.md` | 用户入口·英文 |
 | `LICENSE` | MIT 许可证 |

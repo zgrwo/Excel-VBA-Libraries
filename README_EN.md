@@ -38,7 +38,7 @@ When Excel's built-in functions fall short or pure VBA implementation is too com
 5. Functions returning `Dictionary` are VBA-only (see module header comments)
 6. Save as `.xlsm` (Macro-Enabled Workbook)
 
-> See [agents.md](agents.md) for module dependencies. Pre-packaged files are also available: `docs/VBA_Libraries.xlsm` (import on demand) or `docs/VBA_Libraries.xlam` (add-in, globally available), both including VBA-Core.
+> See [AGENTS.md](AGENTS.md) for module dependencies. Pre-packaged files are also available: `docs/VBA_Libraries.xlsm` (import on demand) or `docs/VBA_Libraries.xlam` (add-in, globally available), both including VBA-Core.
 
 ## How to Use
 
@@ -67,7 +67,7 @@ result = ArraySort(Array(3, 1, 4, 1, 5), True)  ' → Array(1, 1, 3, 4, 5)
 
 ## Module Overview
 
-15 modules across 6 layers. See [agents.md](agents.md) for the full structure with dependencies.
+15 modules across 6 layers. See [AGENTS.md](AGENTS.md) for the full structure with dependencies.
 
 | Layer | Modules |
 |------|------|
@@ -107,14 +107,14 @@ See the [API Reference](rules/api-reference.md) for all function signatures and 
 | [User Manual (EN)](docs/VBA_LIB_User_Manual_EN.md) | End users | Recipe-driven, by scenario |
 | [User Manual (CN)](rules/user-manual.md) | Chinese users | Chinese edition |
 | [API Reference](rules/api-reference.md) | Developers | Function signature lookup |
-| [agents.md](agents.md) | Developers / AI | Project structure, dependencies, coding conventions |
+| [AGENTS.md](AGENTS.md) | Developers / AI | Project structure, dependencies, coding conventions |
 | [README (CN)](README.md) | Chinese readers | Project homepage (Chinese) |
 
-> The complete documentation system (including VBA coding standards, Python test guide, SQL conventions, manual authoring rules) is detailed in the [agents.md](agents.md) document routing table.
+> The complete documentation system (including VBA coding standards, Python test guide, SQL conventions, manual authoring rules) is detailed in the [AGENTS.md](AGENTS.md) document routing table.
 
 ## Testing
 
 > ✅ All tests passed: module unit tests + cross-validation + comprehensive handbook examples.
-> See [agents.md](agents.md) for test framework and run commands. Requires Python 3 + pywin32 + numpy + scipy + Excel (Windows).
+> See [AGENTS.md](AGENTS.md) for test framework and run commands. Requires Python 3 + pywin32 + numpy + scipy + Excel (Windows).
 
 <!-- last_updated: 2026-06-17 -->

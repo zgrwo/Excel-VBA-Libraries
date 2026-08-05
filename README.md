@@ -177,7 +177,7 @@ python tests/utils/integration_test_all_modules.py
 | [用户手册](rules/user-manual.md) | 学习教程 | 每个函数详细示例 + 结果解读 |
 | [context.md](rules/context.md) | 术语表 | 所有领域术语唯一定义 |
 | [project-structure.md](rules/project-structure.md) | 结构地图 | 文件职责与层级关系 |
-| [agents.md](agents.md) | 项目宪法 | 架构分层、红线规则、开发流程 |
+| [AGENTS.md](AGENTS.md) | 项目宪法 | 架构分层、红线规则、开发流程 |
 
 ---
 
@@ -187,7 +187,7 @@ python tests/utils/integration_test_all_modules.py
 
 | 文件 | 面向 | 职责 |
 |------|------|------|
-| `agents.md` | AI 编程助手 | 项目宪法——架构、红线、编码准则、防幻觉铁律 |
+| `AGENTS.md` | AI 编程助手 | 项目宪法——架构、红线、编码准则、防幻觉铁律 |
 | `readme.md` | 人类用户 | 功能指南——安装、模块速览、使用模式（本文件） |
 | `rules/` | AI + 人类 | 规范文档——API 参考、用户手册、术语表、审查模板 |
 | `skills/` | AI 编码 | 技能定义——语言陷阱、编码模式、重构守则 |

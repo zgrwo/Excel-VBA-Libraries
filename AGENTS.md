@@ -1,4 +1,4 @@
-# agents.md — Excel-VBA-Libraries 项目宪法
+# AGENTS.md — Excel-VBA-Libraries 项目宪法
 
 > 高性能 VBA 函数库：15 个模块，纯 VBA 实现，零外部依赖。
 > 本文件面向 AI 编程助手，编码细节按需加载 Skill。
@@ -85,7 +85,7 @@ ExcelVBA函数库/
 ├── .github/                        # CI + Issue/PR 模板
 ├── build/                          # 构建产出
 ├── logs/                           # 日志
-├── agents.md                       # 本文件
+├── AGENTS.md                       # 本文件
 ├── README.md                       # 用户向功能指南 (CN)
 ├── README_EN.md                    # 用户向功能指南 (EN)
 └── LICENSE / CONTRIBUTING.md / ...  # 社区文件
