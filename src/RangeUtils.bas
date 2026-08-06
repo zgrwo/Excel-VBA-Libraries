@@ -509,7 +509,8 @@ End Function
 '   rng           - 源区域
 '   filePath      - 输出路径
 '   delimiter     - 分隔符 (默认 ",")
-'   bom           - 是否添加 UTF-8 BOM (默认 True, Excel 可识别)
+'   bom           - 是否添加 BOM (默认 True); UTF-8/UTF-16LE 下 ADODB.Stream 保存时自动写 BOM,
+'                   bom=False 时通过二进制复制跳过自动 BOM (UTF-8: 3 字节, UTF-16LE: 2 字节)
 '   enc           - 编码: "UTF-8", "ANSI", "UTF-16LE"
 '   includeHeader - 是否包含第一行 (默认 True)
 '=============================================================================
@@ -534,6 +535,8 @@ Public Sub ExportRangeToCSV( _
     GetRangeData rng, data, nRows, nCols
 
     Dim adoStream As Object
+    Dim rawStream As Object
+    Dim bomLen As Long
     ' 此处需要使用标签式错误处理：ADODB.Stream 即使失败也必须关闭。
     ' 其他函数使用 Resume Next，因为它们没有外部资源需要清理。
     On Error GoTo StreamError
@@ -553,12 +556,7 @@ Public Sub ExportRangeToCSV( _
         End Select
         .Open
 
-        If bom Then
-            Select Case UCase$(enc)
-                Case "UTF-8": .WriteText ChrW$(&HFEFF)
-                Case "UTF-16LE", "UNICODE": .WriteText ChrW$(&HFEFF)
-            End Select
-        End If
+        ' 注意: ADODB.Stream 保存 UTF-8/UTF-16LE 时自动写入 BOM — 不得手工再写 (避免双 BOM)
 
         If includeHeader Then startRow = 1 Else startRow = 2
 
@@ -577,7 +575,26 @@ Public Sub ExportRangeToCSV( _
             .WriteText Join(rowParts, ""), 1 ' 写入行
         Next i
 
-        .SaveToFile filePath, 2 ' 保存覆盖
+        ' bom=False: 跳过 ADODB.Stream 自动写入的 BOM (二进制复制)
+        bomLen = 0
+        If Not bom Then
+            Select Case UCase$(enc)
+                Case "UTF-8": bomLen = 3
+                Case "UTF-16LE", "UNICODE": bomLen = 2
+            End Select
+        End If
+        If bomLen > 0 Then
+            Set rawStream = CreateObject("ADODB.Stream")
+            rawStream.Type = 1 ' binary
+            rawStream.Open
+            .Position = bomLen
+            .CopyTo rawStream
+            rawStream.SaveToFile filePath, 2 ' 保存覆盖
+            rawStream.Close
+            Set rawStream = Nothing
+        Else
+            .SaveToFile filePath, 2 ' 保存覆盖
+        End If
         .Close
     End With
     Set adoStream = Nothing
@@ -585,6 +602,12 @@ Public Sub ExportRangeToCSV( _
 
 StreamError:
     ' 清理 ADODB 资源
+    If Not rawStream Is Nothing Then
+        On Error Resume Next
+        rawStream.Close
+        Set rawStream = Nothing
+        On Error GoTo 0
+    End If
     If Not adoStream Is Nothing Then
         On Error Resume Next
         adoStream.Close

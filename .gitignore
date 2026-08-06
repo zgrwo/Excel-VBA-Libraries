@@ -31,3 +31,7 @@ docs/review-checklist.md
 *.swp
 *.swo
 Thumbs.db
+
+# Runtime artifacts (构建产出 / 运行日志)
+build/
+logs/

@@ -53,11 +53,20 @@ Excel sheet names with spaces or special characters must be escaped:
 
 The `EscapeSheetName` function in SqlUtils handles this automatically:
 ```vba
-Private Function EscapeSheetName(ByVal name As String) As String
-    If Right$(name, 1) = "$" Or InStr(name, "$") = 0 Then
-        EscapeSheetName = "[" & name & "]"
+Private Function EscapeSheetName(ByVal sheetName As String) As String
+    ' 已带方括号: 校验配对后原样返回
+    If Left$(sheetName, 1) = "[" Then
+        If Right$(sheetName, 1) <> "]" Then
+            Err.Raise ERR_INVALID_INPUT, "EscapeSheetName", "工作表名方括号不配对: " & sheetName
+        End If
+        EscapeSheetName = sheetName: Exit Function
+    End If
+    ' ] 转义为 ]] (SQL 标准方括号标识符转义)
+    sheetName = Replace(sheetName, "]", "]]")
+    If Right$(sheetName, 1) = "$" Then
+        EscapeSheetName = "[" & sheetName & "]"
     Else
-        EscapeSheetName = "[" & name & "$]"
+        EscapeSheetName = "[" & sheetName & "$]"
     End If
 End Function
 ```
@@ -200,7 +209,7 @@ Dim result As Variant
 result = SqlRangeQuery("SELECT Col1, AVG(Col3) FROM data GROUP BY Col1", rng, "data", ok)
 ```
 
-This creates a temporary workbook, writes the range data to it, runs the SQL query, and deletes the temp file. Column names in the SQL must match the Range header row.
+This builds an **in-memory ADODB.Recordset** from the range data (no temporary workbook/file is created — nothing to leak on error paths), runs the query via client-side cursor filtering, and returns the result. Column names in the SQL must match the Range header row.
 
 ## 8. Common Errors
 

@@ -1830,6 +1830,16 @@ Public Function UDF_STR_EXTRACTBETWEEN( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -1847,6 +1857,16 @@ Public Function UDF_STR_REVERSESTRING(ByVal text As Variant) As Variant
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -1866,6 +1886,16 @@ Public Function UDF_STR_COUNTSUBSTRING( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -1885,6 +1915,16 @@ Public Function UDF_STR_STARTSWITH( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -1904,6 +1944,16 @@ Public Function UDF_STR_ENDSWITH( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -1923,6 +1973,16 @@ Public Function UDF_STR_LEFTOF( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -1943,6 +2003,16 @@ Public Function UDF_STR_RIGHTOF( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -1969,6 +2039,16 @@ Public Function UDF_STR_NTHWORD( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2009,6 +2089,16 @@ Public Function UDF_STR_PADLEFT( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2028,6 +2118,16 @@ Public Function UDF_STR_PADRIGHT( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2047,6 +2147,16 @@ Public Function UDF_STR_TRUNCATE( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2063,6 +2173,16 @@ Public Function UDF_STR_NORMALIZEWHITESPACE(ByVal text As Variant) As Variant
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2081,6 +2201,16 @@ Public Function UDF_STR_REMOVECHARS( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2099,6 +2229,16 @@ Public Function UDF_STR_KEEPCHARS( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2115,6 +2255,16 @@ Public Function UDF_STR_TOTITLECASE(ByVal text As Variant) As Variant
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2131,6 +2281,16 @@ Public Function UDF_STR_REMOVEDIACRITICS(ByVal text As Variant) As Variant
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2149,6 +2309,16 @@ Public Function UDF_STR_SLUGIFY( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2175,6 +2345,16 @@ Public Function UDF_STR_ISEMAIL(ByVal text As Variant) As Variant
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2191,6 +2371,16 @@ Public Function UDF_STR_ISURL(ByVal text As Variant) As Variant
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2227,6 +2417,16 @@ Public Function UDF_STR_SOUNDEX(ByVal text As Variant) As Variant
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2243,6 +2443,16 @@ Public Function UDF_STR_URLENCODE(ByVal text As Variant) As Variant
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2259,6 +2469,16 @@ Public Function UDF_STR_URLDECODE(ByVal text As Variant) As Variant
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2277,6 +2497,16 @@ Public Function UDF_STR_BASE64ENCODE( _
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2311,6 +2541,16 @@ Public Function UDF_STR_HTMLENCODE(ByVal text As Variant) As Variant
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2327,6 +2567,16 @@ Public Function UDF_STR_HTMLDECODE(ByVal text As Variant) As Variant
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)
@@ -2385,6 +2635,16 @@ Public Function UDF_STR_REPEAT(ByVal text As Variant, ByVal n As Variant) As Var
     On Error GoTo EH
     If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
     If IsArray(text) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(text,1) To UBound(text,1), LBound(text,2) To UBound(text,2))
         For i = LBound(text,1) To UBound(text,1)
             For j = LBound(text,2) To UBound(text,2)

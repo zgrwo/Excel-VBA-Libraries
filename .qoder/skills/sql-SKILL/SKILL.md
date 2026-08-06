@@ -1,5 +1,5 @@
 ---
-name: sql
+name: sql-SKILL
 description: >
   SQL for Excel via ADODB — query Excel sheets as database tables using ACE.OLEDB
   or Jet.OLEDB providers. Use when writing SQL against Excel workbooks, debugging

@@ -1729,6 +1729,8 @@ CrossJoin(rng1, rng2) As Variant
 =UDF_PIVOT_CROSSJOIN(rng1, rng2)
 ```
 
+> **Known Limitation**: When used as a worksheet formula, the spill range may be truncated to the input row count; call `CrossJoin` directly from VBA for the full Cartesian product.
+
 ---
 
 ## Chapter 4: SqlUtils -- SQL Queries
@@ -2034,7 +2036,7 @@ SqlListTables([filePath], outOk) As Variant()
 
 > **Environment Requirements**: SqlUtils depends on ADODB and ACE/Jet OLEDB providers. 64-bit Office requires Access Database Engine installation. If workbook is unsaved, use SqlRangeQuery to query a Range directly.
 >
-> **⚠️ SQL Injection Prevention**: ACE OLEDB Excel ISAM driver does not support parameterized queries. Use `SqlEscapeString()` to escape user-supplied cell values (`'` → `''`) before embedding them in WHERE/VALUES clauses: `=UDF_SQL_QUERY("SELECT * FROM [Sheet1$] WHERE Name = '" & SqlEscapeString(A1) & "'")`
+> **⚠️ SQL Injection Prevention**: ACE OLEDB Excel ISAM driver does not support parameterized queries. Use `SqlEscapeString()` to escape user-supplied cell values (`'` → `''`) before embedding them in WHERE/VALUES clauses: `=UDF_SQL_QUERY("SELECT * FROM [Sheet1$] WHERE Name = '" & SqlEscapeString(A1) & "'")`. Note: Error-valued cells (#N/A, #VALUE!, etc.) are silently converted to an empty string (to prevent `CStr` crashes) — upstream data containing errors may yield empty result sets; clean the data first.
 >
 > **Naming Convention**: Worksheet names in SQL require a `$` suffix and square brackets, e.g. `[Sheet1$]`. Column names with special characters are auto-cleaned by SqlRangeQuery.
 ---
@@ -4237,7 +4239,7 @@ Pure VBA recursive-descent JSON parser with zero external dependencies. Supports
 
 #### JsonParse
 
-Parse a JSON string into VBA native types. Object → Dictionary, arrays → Variant(), scalars converted by type. **VBA-only** (Dictionary cannot be returned directly to a worksheet).
+Parse a JSON string into VBA native types. Object → Dictionary, arrays → Variant(), scalars converted by type. **VBA-only** (Dictionary cannot be returned directly to a worksheet). Object keys are case-sensitive (RFC 8259): `{"a":1,"A":2}` keeps both keys.
 
 **VBA Usage**
 ```vb
@@ -5088,6 +5090,8 @@ result = FilterRangeToArray(Range("A1:D100"), 2, ">=", 80)
 =UDF_RANGE_FILTER(range, filterCol, operator, value)
 ```
 
+> **Known Limitation**: In legacy Excel this UDF does not produce a full spill array (requires Ctrl+Shift+Enter array formula or Excel 365 dynamic arrays); prefer calling `FilterRangeToArray` directly from VBA.
+
 #### FindAll
 
 Find all matching cells in a range, returns a Union Range. Supports searching by value/formula/comment.
@@ -5146,6 +5150,8 @@ CopyRangeToSheet myArray, Range("A1")
 ## Chapter 14: FileSystemUtils — UTF-8 File I/O, Folder Traversal & Drive Info
 
 File system tools based on Scripting.FileSystemObject and ADODB.Stream, supporting UTF-8 text I/O, file/folder enumeration, path parsing & drive information. **Module**: `FileSystemUtils.bas`
+
+> **⚠️ Path Safety Restrictions**: Every path argument passes `ValidateSafePath`: paths containing `..` (directory traversal) and UNC paths (`\\server\share` as well as `//server/share`) are rejected. Known limitation: symbolic links/junctions are not resolved. Note the failure semantics: except for `ReadBinaryFile` (which raises), most functions fail silently when a path is rejected (e.g. `ReadTextFile` returns `""`, `DeleteFile`/`CopyFileSafe` return `False`) — callers previously using UNC or `..` paths will see "silent success/empty results" after upgrading; audit your paths first.
 
 **Quick Reference**
 
@@ -5566,6 +5572,8 @@ MassToMoles(mass, molWeight) As Double
 MolesToMass(moles, molWeight) As Double
 ```
 
+Unit convention: mass in g, moles in mol, molWeight in g/mol.
+
 ```vb
 n = MassToMoles(58.44, 58.44)  ' → 1 (mol NaCl)
 m = MolesToMass(2, 18.015)     ' → 36.03 (g H2O)
@@ -5584,6 +5592,8 @@ Density solver: calculate the third quantity from any two known quantities among
 ```vb
 Density(m, v, rho) As Double
 ```
+
+Unit convention: mass in g, volume in mL, rho in g/mL.
 
 ```vb
 v = Density(100, 0, 2.5)  ' → 40 (volume = mass/density)

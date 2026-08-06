@@ -1,6 +1,6 @@
 ---
 description: "重构守卫专家 — 在每个重构 Phase 前后执行安全网检查，确保零回归。"
-name: "重构守卫"
+name: refactoring-guardian
 argument-hint: "[phase: 0|1|2|3|4] [action: start|end]"
 ---
 

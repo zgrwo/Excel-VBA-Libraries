@@ -322,11 +322,8 @@ Private Function CompareValues(ByVal a As Variant, ByVal b As Variant) As Long
 End Function
 
 '=============================================================================
-' CompareAtIndices — 通过索引比较数组中的两个元素 (委托给 CompareValues)
+' (CompareAtIndices 已删除 — 无调用者的死代码)
 '=============================================================================
-Private Function CompareAtIndices(ByRef arr As Variant, ByVal idxA As Long, ByVal idxB As Long) As Long
-    CompareAtIndices = CompareValues(arr(idxA), arr(idxB))
-End Function
 
 '=============================================================================
 ' FilterPasses / FilterEquals — 筛选条件判断

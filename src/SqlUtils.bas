@@ -576,6 +576,10 @@ Public Function SqlRangeQuery( _
     End If
 
     On Error GoTo RangeQueryErr
+    ' 多区域检查置于 handler 之后 — 保持 outOk=False 软失败契约 (与 rng.Value 失败路径一致)
+    If rng.Areas.Count > 1 Then
+        Err.Raise ERR_INVALID_INPUT, "SqlRangeQuery", "不支持多区域 Range，请使用单个连续区域。"
+    End If
     Set rs = CreateObject("ADODB.Recordset")
     rs.CursorLocation = 3  ' adUseClient
     data = rng.Value

@@ -1,6 +1,6 @@
 ---
 description: "项目规划效果审查 — 8 维度评估 refactoring-plan 的质量与可执行性。"
-name: "项目规划效果审查"
+name: project-plan-review
 argument-hint: "[审查对象: refactoring-plan.md] [--focus 可执行性|退出路径]"
 ---
 

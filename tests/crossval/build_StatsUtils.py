@@ -109,6 +109,11 @@ TEST_CASES = [
      "args": lambda: (DATA_5, DATA_5[0]),
      "py_ref": lambda a: (a[1] - np.mean(a[0])) / np.std(a[0], ddof=1),
      "result_type": "scalar", "tol": 1e-6},
+    # ST-03 回归: 小量级数据 (1e-14 尺度) 不得被绝对容差误判为零方差
+    {"name": "ZScore_small_scale", "func": "ZScore",
+     "args": lambda: ([1e-14, 2e-14, 3e-14],),
+     "py_ref": lambda a: (np.array(a[0]) - np.mean(a[0])) / np.std(a[0], ddof=1),
+     "result_type": "array", "tol": 1e-6},
 
     # ---- Skewness (needs scipy) ----
     {"name": "Skewness", "func": "Skewness",

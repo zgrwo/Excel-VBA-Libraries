@@ -478,6 +478,8 @@ Public Function ValuesEqual(ByVal a As Variant, ByVal b As Variant) As Boolean
     If IsNumeric(a) And IsNumeric(b) Then
         ValuesEqual = (Abs(CDbl(a) - CDbl(b)) < 1E-12): Exit Function
     End If
+    ' 日期分支: vbDate 值已在上方 IsNumeric 路径按数值容差比较 (IsNumeric(Date)=True);
+    ' 本分支仅处理日期样式的字符串 (如 "2024-01-01", IsNumeric 为 False).
     If IsDate(a) And IsDate(b) Then
         Dim da As Variant, db As Variant
         Dim okA As Boolean, okB As Boolean
@@ -540,10 +542,16 @@ Public Function Compare(ByVal a As Variant, ByVal b As Variant) As Long
         If IsArray(a) And IsArray(b) Then
             Dim dimsA As Long: dimsA = ArrayDims(a)
             Dim dimsB As Long: dimsB = ArrayDims(b)
-            If dimsA <> dimsB Then If dimsA < dimsB Then Compare = -1 Else Compare = 1: Exit Function
+            If dimsA <> dimsB Then
+                If dimsA < dimsB Then Compare = -1 Else Compare = 1
+                Exit Function
+            End If
             Dim nA As Long: nA = UBound(a, 1) - LBound(a, 1) + 1
             Dim nB As Long: nB = UBound(b, 1) - LBound(b, 1) + 1
-            If nA <> nB Then If nA < nB Then Compare = -1 Else Compare = 1: Exit Function
+            If nA <> nB Then
+                If nA < nB Then Compare = -1 Else Compare = 1
+                Exit Function
+            End If
             ' Arrays of same dims/size are equal for ordering
             Compare = 0: Exit Function
         End If

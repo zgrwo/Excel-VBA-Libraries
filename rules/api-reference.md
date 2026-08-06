@@ -5,7 +5,7 @@
 > Function signature quick reference. For full usage and examples see [User Manual (CN)](VBA_LIB_User_Manual.md) / [User Manual (EN)](VBA_LIB_User_Manual_EN.md).
 
 <!-- AUTO_COUNTS_START -->
-**15 模块 | 533 Public Functions | 34 Public Subs | 共 567 个 Public 接口**
+**15 模块 | 533 Public Functions | 33 Public Subs | 共 566 个 Public 接口**
 <!-- AUTO_COUNTS_END -->
 
 ---

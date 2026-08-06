@@ -1,6 +1,6 @@
 ---
 description: "架构审查员 — 对新增组件/模块/依赖执行 YAGNI 四问 + 过度设计检测。"
-name: "架构审查员"
+name: architecture-reviewer
 argument-hint: "[审查对象: 新增模块/依赖/架构变更]"
 ---
 

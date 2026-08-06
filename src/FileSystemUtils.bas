@@ -80,6 +80,7 @@ Private DP As New DictProxy
 
 Private Const FSO_PROGID As String = "Scripting.FileSystemObject"
 Private Const ERR_NOT_AVAIL   As Long = vbObjectError + 1001  ' Reserved
+Private Const ERR_INVALID_INPUT As Long = vbObjectError + 1002
 Private Const ERR_FILE_NOT_FOUND As Long = vbObjectError + 1010
 Private Const ERR_BINARY_READ As Long = vbObjectError + 1011
 Private Const ERR_BINARY_WRITE As Long = vbObjectError + 1012
@@ -1093,22 +1094,39 @@ Public Function TempFileName( _
 End Function
 
 '=============================================================================
+' ContainsTraversal — 判断 ".." 是否作为完整路径段出现 (目录穿越攻击)
+'
+' 仅段级匹配: 文件名内的连续点 (如 "data..v2.txt") 不构成穿越, 不误杀.
+'=============================================================================
+Private Function ContainsTraversal(ByVal path As String) As Boolean
+    Dim norm As String
+    norm = Replace(path, "/", "\")
+    norm = Replace(norm, "\\", "\")
+    ContainsTraversal = (InStr("\" & norm & "\", "\..\") > 0)
+End Function
+
+'=============================================================================
 ' ValidateSafePath — 防目录穿越攻击
 '
-' 拒绝含 ".." 的路径 (包括规范化后), 防止沙箱外文件访问.
-' 允许 Windows 绝对路径 (含 :), 但会规范化检查是否含 ..
+' 拒绝 ".." 路径段 (包括规范化后), 防止沙箱外文件访问.
+' 允许 Windows 绝对路径 (含 :), 但会规范化检查是否含 .. 段.
+' 拒绝 UNC 路径 (\\server\share) — 远程目标不受本地沙箱约束.
+' 已知限制: 不解析符号链接/junction (GetAbsolutePathName 不展开).
 '=============================================================================
 Private Function ValidateSafePath(ByVal path As String) As Boolean
-    ' 拒绝含 .. 的路径 (目录穿越攻击)
-    If InStr(path, "..") > 0 Then Exit Function
+    ' 拒绝含 ".." 路径段的路径 (目录穿越攻击; 文件名内连续点不受影响)
+    If ContainsTraversal(path) Then Exit Function
+    ' 拒绝 UNC 路径 (远程共享不受本地安全策略约束; 兼容 \\ 与 // 两种写法)
+    If Left$(path, 2) = "\\" Or Left$(path, 2) = "//" Then Exit Function
     ' 规范化路径后再检查一次 (防止规范化展开 .. 的攻击)
     Dim fso As Object: Set fso = GetFSO()
     If Not fso Is Nothing Then
+        Dim normPath As String: normPath = ""  ' 先置空, 避免探测失败时残留旧值
         On Error Resume Next
-        Dim normPath As String: normPath = fso.GetAbsolutePathName(path)
+        normPath = fso.GetAbsolutePathName(path)
         On Error GoTo 0
         If Len(normPath) > 0 Then
-            If InStr(normPath, "..") > 0 Then Exit Function
+            If ContainsTraversal(normPath) Then Exit Function
         End If
     End If
     ValidateSafePath = True
@@ -1203,8 +1221,14 @@ Public Function ReadBinaryFile(ByVal filePath As String, Optional ByRef outOk As
             "文件不存在: " & filePath
     End If
     If Not ValidateSafePath(filePath) Then
+        Dim rejReason As String
+        If Left$(filePath, 2) = "\\" Or Left$(filePath, 2) = "//" Then
+            rejReason = "UNC 路径不受支持"
+        Else
+            rejReason = "路径含 '..' 目录穿越段"
+        End If
         Err.Raise ERR_INVALID_INPUT, "ReadBinaryFile", _
-            "路径包含不安全的目录穿越字符: " & filePath
+            "路径被安全检查拒绝 (" & rejReason & "): " & filePath
     End If
 
     ' 首选: ADODB.Stream (最快, 可处理大文件)

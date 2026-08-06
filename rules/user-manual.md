@@ -1730,6 +1730,8 @@ CrossJoin(rng1, rng2) As Variant
 =UDF_PIVOT_CROSSJOIN(rng1, rng2)
 ```
 
+> **已知限制**: 作为工作表公式使用时溢出区域可能被截断为输入行数；完整笛卡尔积请在 VBA 中直接调用 `CrossJoin`。
+
 ---
 
 ## Chapter 4: SqlUtils -- SQL 查询
@@ -2035,7 +2037,7 @@ SqlListTables([filePath], outOk) As Variant()
 
 > **环境要求**: SqlUtils 依赖 ADODB 和 ACE/Jet OLEDB 提供程序。64 位 Office 需安装 Access Database Engine。若工作簿未保存，使用 SqlRangeQuery 可直接对 Range 查询。
 >
-> **⚠️ SQL 注入防护**: ACE OLEDB Excel ISAM 驱动不支持参数化查询。使用 `SqlEscapeString()` 转义来自单元格的用户输入（`'` → `''`），避免在 `WHERE`/`VALUES` 子句中直接拼接未转义的用户输入: `=UDF_SQL_QUERY("SELECT * FROM [Sheet1$] WHERE Name = '" & SqlEscapeString(A1) & "'")`
+> **⚠️ SQL 注入防护**: ACE OLEDB Excel ISAM 驱动不支持参数化查询。使用 `SqlEscapeString()` 转义来自单元格的用户输入（`'` → `''`），避免在 `WHERE`/`VALUES` 子句中直接拼接未转义的用户输入: `=UDF_SQL_QUERY("SELECT * FROM [Sheet1$] WHERE Name = '" & SqlEscapeString(A1) & "'")`。注意: Error 值单元格（#N/A、#VALUE! 等）会被静默转为空字符串（防 `CStr` 崩溃）——上游数据含 Error 时可能得到空结果集，请先清理数据。
 >
 > **命名约定**: 工作表名在 SQL 中需加 `$` 后缀并用方括号包裹，如 `[Sheet1$]`。列名含特殊字符时 SqlRangeQuery 会自动清理。
 ---
@@ -4204,7 +4206,7 @@ s = RegexEscape("1+1=2?")  ' → "1\+1=2\?"
 
 #### JsonParse
 
-解析 JSON 字符串为 VBA 原生类型。对象 → Dictionary，数组 → Variant()，标量按类型转换。**仅 VBA** (Dictionary 无法直接返回到工作表)。
+解析 JSON 字符串为 VBA 原生类型。对象 → Dictionary，数组 → Variant()，标量按类型转换。**仅 VBA** (Dictionary 无法直接返回到工作表)。对象键大小写敏感 (RFC 8259): `{"a":1,"A":2}` 保留两个键。
 
 **VBA Usage**
 ```vb
@@ -5043,6 +5045,8 @@ result = FilterRangeToArray(Range("A1:D100"), 2, ">=", 80)
 =UDF_RANGE_FILTER(range, filterCol, operator, value)
 ```
 
+> **已知限制**: 旧版 Excel 中该 UDF 不产生完整溢出数组（需 Ctrl+Shift+Enter 数组公式或 Excel 365 动态数组）；建议改用 VBA 直接调用 `FilterRangeToArray`。
+
 #### FindAll
 
 在区域中查找所有匹配单元格，返回 Union Range。支持按值/公式/注释查找。
@@ -5101,6 +5105,8 @@ CopyRangeToSheet myArray, Range("A1")
 ## Chapter 14: FileSystemUtils — UTF-8 文件读写、文件夹遍历与驱动器信息
 
 基于 Scripting.FileSystemObject 和 ADODB.Stream 的文件系统工具，支持 UTF-8 文本读写、文件/文件夹枚举、路径解析与驱动器信息。**模块**: `FileSystemUtils.bas`
+
+> **⚠️ 路径安全限制**: 所有路径参数经 `ValidateSafePath` 检查：拒绝含 `..` 的目录穿越路径与 UNC 路径（`\\server\share` 及 `//server/share`）。已知限制：不解析符号链接/junction。注意失败语义：除 `ReadBinaryFile` 抛错外，多数函数在路径被拒时静默返回空值/`False`（如 `ReadTextFile` 返回 `""`、`DeleteFile`/`CopyFileSafe` 返回 `False`）——使用 UNC 或含 `..` 路径的调用方升级后会得到“假成功/空结果”，请先自查路径。
 
 **Quick Reference**
 
@@ -5521,6 +5527,8 @@ MassToMoles(mass, molWeight) As Double
 MolesToMass(moles, molWeight) As Double
 ```
 
+单位约定：mass 单位 g，moles 单位 mol，molWeight 单位 g/mol。
+
 ```vb
 n = MassToMoles(58.44, 58.44)  ' → 1 (mol NaCl)
 m = MolesToMass(2, 18.015)     ' → 36.03 (g H2O)
@@ -5539,6 +5547,8 @@ m = MolesToMass(2, 18.015)     ' → 36.03 (g H2O)
 ```vb
 Density(m, v, rho) As Double
 ```
+
+单位约定：mass 单位 g，volume 单位 mL，rho 单位 g/mL。
 
 ```vb
 v = Density(100, 0, 2.5)  ' → 40 (体积 = 质量/密度)

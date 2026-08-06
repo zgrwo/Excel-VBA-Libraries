@@ -1,5 +1,5 @@
 ---
-name: vba
+name: vba-SKILL
 description: >
   Excel VBA Libraries development best practices and patterns.
   Use when writing, reviewing, or refactoring VBA code for Excel,

@@ -4,7 +4,7 @@ Option Explicit
 ' Module:       LinearUtils
 ' Purpose:      Linear algebra: SVD, QR, LU, Cholesky, PINV, eigenvalues
 ' Layer:        Statistics
-' Dependencies: VBA-Core (VariantKit, ArrayOps, DictProxy)
+' Dependencies: VBA-Core (VariantKit)
 ' Public:       50 functions/subs
 '==============================================================================
 
@@ -75,10 +75,19 @@ Private Const ERR_HADAMARD_MISMATCH As Long = vbObjectError + 2103
 Private Const ERR_POWER_SQUARE    As Long = vbObjectError + 2104
 Private Const ERR_NEG_EXPONENT    As Long = vbObjectError + 2105
 Private Const ERR_LU_SQUARE       As Long = vbObjectError + 1060
+Private Const TOL_RANK_DEFICIENT  As Double = 1E-14  ' 秩亏判定容差 (PolyFit 回代)
 
 '=============================================================================
 ' 私有辅助函数
 '=============================================================================
+' AsVariantMatrix — Range 输入 → Value 数组 (局部副本, 不修改调用方参数)
+Private Function AsVariantMatrix(ByRef A As Variant) As Variant
+    If IsObject(A) Then
+        If TypeOf A Is Range Then AsVariantMatrix = A.Value: Exit Function
+    End If
+    AsVariantMatrix = A
+End Function
+
 Private Function IsFiniteDouble(ByVal x As Double) As Boolean
     IsFiniteDouble = (x = x) And (Abs(x) <= MAX_DOUBLE)
 End Function
@@ -463,13 +472,14 @@ End Sub
 '=============================================================================
 Public Function MatrixTranspose(ByRef A As Variant) As Double()
     ValidateMatrix A, "A"
+    Dim matA As Variant: matA = AsVariantMatrix(A)
     Dim m As Long, n As Long, i As Long, j As Long
-    m = MatrixRows(A): n = MatrixCols(A)
+    m = MatrixRows(matA): n = MatrixCols(matA)
     Dim result() As Double
     ReDim result(1 To n, 1 To m)
     For i = 1 To m
         For j = 1 To n
-            result(j, i) = A(LBound(A, 1) + i - 1, LBound(A, 2) + j - 1)
+            result(j, i) = matA(LBound(matA, 1) + i - 1, LBound(matA, 2) + j - 1)
         Next j
     Next i
     MatrixTranspose = result
@@ -488,13 +498,14 @@ End Function
 
 Public Function MatrixCopy(ByRef A As Variant) As Double()
     ValidateMatrix A, "A"
+    Dim matA As Variant: matA = AsVariantMatrix(A)
     Dim m As Long, n As Long, i As Long, j As Long
-    m = MatrixRows(A): n = MatrixCols(A)
+    m = MatrixRows(matA): n = MatrixCols(matA)
     Dim result() As Double
     ReDim result(1 To m, 1 To n)
     For i = 1 To m
         For j = 1 To n
-            result(i, j) = A(LBound(A, 1) + i - 1, LBound(A, 2) + j - 1)
+            result(i, j) = matA(LBound(matA, 1) + i - 1, LBound(matA, 2) + j - 1)
         Next j
     Next i
     MatrixCopy = result
@@ -502,8 +513,9 @@ End Function
 
 Public Function MatrixGetColumn(ByRef A As Variant, ByVal k As Long) As Double()
     ValidateMatrix A, "A"
+    Dim matA As Variant: matA = AsVariantMatrix(A)
     Dim m As Long, n As Long, i As Long
-    m = MatrixRows(A): n = MatrixCols(A)
+    m = MatrixRows(matA): n = MatrixCols(matA)
     If k < 1 Or k > n Then
         Err.Raise ERR_COL_OUT_OF_RANGE, "MatrixGetColumn", _
             "列索引 k=" & k & " 越界，矩阵为 " & m & "x" & n
@@ -511,7 +523,7 @@ Public Function MatrixGetColumn(ByRef A As Variant, ByVal k As Long) As Double()
     Dim result() As Double
     ReDim result(1 To m)
     For i = 1 To m
-        result(i) = A(LBound(A, 1) + i - 1, LBound(A, 2) + k - 1)
+        result(i) = matA(LBound(matA, 1) + i - 1, LBound(matA, 2) + k - 1)
     Next i
     MatrixGetColumn = result
 End Function
@@ -552,23 +564,25 @@ Public Function MatrixMultiply(ByRef A As Variant, _
 
     ValidateMatrix A, "A"
     ValidateMatrix B, "B"
+    Dim matA As Variant: matA = AsVariantMatrix(A)
+    Dim matB As Variant: matB = AsVariantMatrix(B)
     If blockSize < 1 Then blockSize = 1
 
-    mA = MatrixRows(A): nA = MatrixCols(A)
-    mB = MatrixRows(B): nB = MatrixCols(B)
+    mA = MatrixRows(matA): nA = MatrixCols(matA)
+    mB = MatrixRows(matB): nB = MatrixCols(matB)
     If nA <> mB Then
         Err.Raise ERR_DIM_MISMATCH, "MatrixMultiply", _
             "维度不匹配: A为 " & mA & "x" & nA & ", B为 " & mB & "x" & nB
     End If
     ' 小矩阵使用朴素算法 (分块开销超过缓存收益; 阈值 64 按 SKILL.md §5.3)
     If nA <= 64 Or nB <= 64 Then
-        MatrixMultiply = MatrixMultiplyNaive(A, B)
+        MatrixMultiply = MatrixMultiplyNaive(matA, matB)
         Exit Function
     End If
 
     ReDim result(1 To mA, 1 To nB)
-    rA0 = LBound(A, 1): cA0 = LBound(A, 2)
-    rB0 = LBound(B, 1): cB0 = LBound(B, 2)
+    rA0 = LBound(matA, 1): cA0 = LBound(matA, 2)
+    rB0 = LBound(matB, 1): cB0 = LBound(matB, 2)
     bs = blockSize
     If bs > nA Then bs = nA
 
@@ -585,11 +599,11 @@ Public Function MatrixMultiply(ByRef A As Variant, _
                         tempRes(j) = result(i, jj + j - 1)
                     Next j
                     For k = kk To k2
-                        tempA = A(rA0 + i - 1, cA0 + k - 1)
+                        tempA = matA(rA0 + i - 1, cA0 + k - 1)
                         If tempA <> 0# Then
                             rBk = rB0 + k - 1
                             For j = 1 To tmpSize
-                                tempRes(j) = tempRes(j) + tempA * B(rBk, cB0 + jj + j - 2)
+                                tempRes(j) = tempRes(j) + tempA * matB(rBk, cB0 + jj + j - 2)
                             Next j
                         End If
                     Next k
@@ -612,20 +626,22 @@ Public Function MatrixMultiplyNaive(ByRef A As Variant, ByRef B As Variant) As D
     Dim s As Double, c As Double, y As Double, t As Double  ' Kahan compensation vars
     ValidateMatrix A, "A"
     ValidateMatrix B, "B"
-    mA = MatrixRows(A): nA = MatrixCols(A)
-    mB = MatrixRows(B): nB = MatrixCols(B)
-    If nA <> mB Then Err.Raise ERR_DIM_MISMATCH, , "维度不匹配"
+    Dim matA As Variant: matA = AsVariantMatrix(A)
+    Dim matB As Variant: matB = AsVariantMatrix(B)
+    mA = MatrixRows(matA): nA = MatrixCols(matA)
+    mB = MatrixRows(matB): nB = MatrixCols(matB)
+    If nA <> mB Then Err.Raise ERR_DIM_MISMATCH, "MatrixMultiplyNaive", "维度不匹配"
 
     ReDim result(1 To mA, 1 To nB)
-    rA0 = LBound(A, 1)
-    cA0 = LBound(A, 2)
-    rB0 = LBound(B, 1)
-    cB0 = LBound(B, 2)
+    rA0 = LBound(matA, 1)
+    cA0 = LBound(matA, 2)
+    rB0 = LBound(matB, 1)
+    cB0 = LBound(matB, 2)
     For i = 1 To mA
         For j = 1 To nB
             s = 0#: c = 0#  ' Kahan: sum and compensation
             For k = 1 To nA
-                y = A(rA0 + i - 1, cA0 + k - 1) * B(rB0 + k - 1, cB0 + j - 1) - c
+                y = matA(rA0 + i - 1, cA0 + k - 1) * matB(rB0 + k - 1, cB0 + j - 1) - c
                 t = s + y
                 c = (t - s) - y  ' Kahan: recover lost low-order bits
                 s = t
@@ -654,7 +670,7 @@ Public Sub SVD(ByRef A() As Double, _
 
     If tol <= 0# Or tol < NUM_EPSILON Then tol = DEFAULT_TOL
     If maxSweeps < 1 Then maxSweeps = MAX_SWEEPS
-    If maxSweeps > 100000 Then Err.Raise ERR_SWEEP_LIMIT, , "maxSweeps 过大"
+    If maxSweeps > 100000 Then Err.Raise ERR_SWEEP_LIMIT, "SVD", "maxSweeps 过大"
 
     ' m < n (wide matrix): compute SVD of Aᵀ instead, then swap U ↔ Vt.
     ' A = U·Σ·Vt  ⇒  Aᵀ = V·Σ·Uᵀ  ⇒  SVD(Aᵀ) = (V, Σ, Uᵀ)
@@ -943,10 +959,10 @@ Public Sub EigenSymmetric(ByRef A() As Double, _
     Dim workA() As Double
     workA = MatrixCopy(A)  ' 确保 1-based，内部函数依赖此约定，使用局部变量避免修改调用方数组
     n = MatrixRows(workA)
-    If MatrixCols(workA) <> n Then Err.Raise ERR_NOT_SQUARE, , "矩阵必须是方阵。"
+    If MatrixCols(workA) <> n Then Err.Raise ERR_NOT_SQUARE, "EigenSymmetric", "矩阵必须是方阵。"
     If tol <= 0# Or tol < NUM_EPSILON Then tol = DEFAULT_TOL
     If maxSweeps < 1 Then maxSweeps = MAX_SWEEPS
-    If maxSweeps > 100000 Then Err.Raise ERR_SWEEP_LIMIT, , "maxSweeps 过大"
+    If maxSweeps > 100000 Then Err.Raise ERR_SWEEP_LIMIT, "EigenSymmetric", "maxSweeps 过大"
 
     maxAbsA = 0#
     For i = 1 To n
@@ -965,7 +981,7 @@ Public Sub EigenSymmetric(ByRef A() As Double, _
                 D(i, j) = workA(i, j) / maxAbsA
                 If j > i Then
                     If Abs(workA(i, j) - workA(j, i)) > symTol Then
-                        Err.Raise ERR_NOT_SYMMETRIC, , "矩阵不对称，请使用 SVD。"
+                        Err.Raise ERR_NOT_SYMMETRIC, "EigenSymmetric", "矩阵不对称，请使用 SVD。"
                     End If
                 End If
             Next j
@@ -1054,8 +1070,8 @@ Public Sub QRDecomposition(ByRef A() As Double, _
 
     ValidateMatrix A, "A"
     m = MatrixRows(A): n = MatrixCols(A)
-    If m > 10000 Or n > 10000 Then Err.Raise ERR_MATRIX_TOO_BIG, , "矩阵过大。"
-    If m < 1 Or n < 1 Then Err.Raise ERR_DIM_INVALID, , "矩阵维度无效。"
+    If m > 10000 Or n > 10000 Then Err.Raise ERR_MATRIX_TOO_BIG, "QRDecomposition", "矩阵过大。"
+    If m < 1 Or n < 1 Then Err.Raise ERR_DIM_INVALID, "QRDecomposition", "矩阵维度无效。"
 
     R = MatrixCopy(A)
     Q = IdentityMatrix(m)
@@ -1115,7 +1131,9 @@ Public Sub QRDecomposition(ByRef A() As Double, _
     ' 经济模式
     If economy Then
         Dim Rout() As Double, Qout() As Double
-        ' 确保 R 方阵: maxK x maxK (只保留三角部分)
+        ' 确保 R 方阵: maxK x maxK (只保留三角部分).
+        ' 注意: 宽矩阵 (m<n) 时经济模式 R 为 m×m, 丢弃第 m+1..n 列 —
+        ' 与主流 reduced-QR (m×n 上梯形) 语义不同, 此时 Q·R 不等于 A.
         ReDim Rout(1 To maxK, 1 To maxK)
         Dim rr As Long, cc As Long
         For rr = 1 To maxK
@@ -1156,8 +1174,8 @@ Public Sub QRDecompositionPiv(ByRef A() As Double, _
 
     ValidateMatrix A, "A"
     m = MatrixRows(A): n = MatrixCols(A)
-    If m > 10000 Or n > 10000 Then Err.Raise ERR_MATRIX_TOO_BIG, , "矩阵过大。"
-    If m < 1 Or n < 1 Then Err.Raise ERR_DIM_INVALID, , "矩阵维度无效。"
+    If m > 10000 Or n > 10000 Then Err.Raise ERR_MATRIX_TOO_BIG, "QRDecompositionPiv", "矩阵过大。"
+    If m < 1 Or n < 1 Then Err.Raise ERR_DIM_INVALID, "QRDecompositionPiv", "矩阵维度无效。"
 
     R = MatrixCopy(A)
     Q = IdentityMatrix(m)
@@ -1405,15 +1423,16 @@ End Function
 ' MatrixTrace — 方阵的迹 (对角线元素之和)
 Public Function MatrixTrace(ByRef A As Variant) As Double
     ValidateMatrix A, "A"
+    Dim matA As Variant: matA = AsVariantMatrix(A)
     Dim m As Long, n As Long, i As Long
-    m = MatrixRows(A): n = MatrixCols(A)
+    m = MatrixRows(matA): n = MatrixCols(matA)
     If m <> n Then Err.Raise ERR_NOT_SQUARE, "MatrixTrace", "矩阵必须是方阵。"
 
-    Dim r0 As Long: r0 = LBound(A, 1)
-    Dim c0 As Long: c0 = LBound(A, 2)
+    Dim r0 As Long: r0 = LBound(matA, 1)
+    Dim c0 As Long: c0 = LBound(matA, 2)
     Dim result As Double: result = 0#
     For i = 1 To n
-        result = result + A(r0 + i - 1, c0 + i - 1)
+        result = result + matA(r0 + i - 1, c0 + i - 1)
     Next i
     MatrixTrace = result
 End Function
@@ -1421,15 +1440,16 @@ End Function
 ' MatrixScale — 标量乘法
 Public Function MatrixScale(ByRef A As Variant, ByVal scalar As Double) As Double()
     ValidateMatrix A, "A"
+    Dim matA As Variant: matA = AsVariantMatrix(A)
     Dim m As Long, n As Long, i As Long, j As Long
-    m = MatrixRows(A): n = MatrixCols(A)
+    m = MatrixRows(matA): n = MatrixCols(matA)
     Dim result() As Double
     ReDim result(1 To m, 1 To n)
-    Dim r0 As Long: r0 = LBound(A, 1)
-    Dim c0 As Long: c0 = LBound(A, 2)
+    Dim r0 As Long: r0 = LBound(matA, 1)
+    Dim c0 As Long: c0 = LBound(matA, 2)
     For i = 1 To m
         For j = 1 To n
-            result(i, j) = A(r0 + i - 1, c0 + j - 1) * scalar
+            result(i, j) = matA(r0 + i - 1, c0 + j - 1) * scalar
         Next j
     Next i
     MatrixScale = result
@@ -1439,9 +1459,11 @@ End Function
 Public Function MatrixAdd(ByRef A As Variant, ByRef B As Variant) As Double()
     ValidateMatrix A, "A"
     ValidateMatrix B, "B"
+    Dim matA As Variant: matA = AsVariantMatrix(A)
+    Dim matB As Variant: matB = AsVariantMatrix(B)
     Dim mA As Long, nA As Long, mB As Long, nB As Long
-    mA = MatrixRows(A): nA = MatrixCols(A)
-    mB = MatrixRows(B): nB = MatrixCols(B)
+    mA = MatrixRows(matA): nA = MatrixCols(matA)
+    mB = MatrixRows(matB): nB = MatrixCols(matB)
     If mA <> mB Or nA <> nB Then
         Err.Raise ERR_ADD_MISMATCH, "MatrixAdd", "矩阵维度不匹配: A=" & mA & "x" & nA & ", B=" & mB & "x" & nB
     End If
@@ -1449,11 +1471,11 @@ Public Function MatrixAdd(ByRef A As Variant, ByRef B As Variant) As Double()
     Dim result() As Double
     ReDim result(1 To mA, 1 To nA)
     Dim i As Long, j As Long
-    Dim rA0 As Long: rA0 = LBound(A, 1): Dim cA0 As Long: cA0 = LBound(A, 2)
-    Dim rB0 As Long: rB0 = LBound(B, 1): Dim cB0 As Long: cB0 = LBound(B, 2)
+    Dim rA0 As Long: rA0 = LBound(matA, 1): Dim cA0 As Long: cA0 = LBound(matA, 2)
+    Dim rB0 As Long: rB0 = LBound(matB, 1): Dim cB0 As Long: cB0 = LBound(matB, 2)
     For i = 1 To mA
         For j = 1 To nA
-            result(i, j) = A(rA0 + i - 1, cA0 + j - 1) + B(rB0 + i - 1, cB0 + j - 1)
+            result(i, j) = matA(rA0 + i - 1, cA0 + j - 1) + matB(rB0 + i - 1, cB0 + j - 1)
         Next j
     Next i
     MatrixAdd = result
@@ -1463,9 +1485,11 @@ End Function
 Public Function MatrixSubtract(ByRef A As Variant, ByRef B As Variant) As Double()
     ValidateMatrix A, "A"
     ValidateMatrix B, "B"
+    Dim matA As Variant: matA = AsVariantMatrix(A)
+    Dim matB As Variant: matB = AsVariantMatrix(B)
     Dim mA As Long, nA As Long, mB As Long, nB As Long
-    mA = MatrixRows(A): nA = MatrixCols(A)
-    mB = MatrixRows(B): nB = MatrixCols(B)
+    mA = MatrixRows(matA): nA = MatrixCols(matA)
+    mB = MatrixRows(matB): nB = MatrixCols(matB)
     If mA <> mB Or nA <> nB Then
         Err.Raise ERR_SUB_MISMATCH, "MatrixSubtract", "矩阵维度不匹配: A=" & mA & "x" & nA & ", B=" & mB & "x" & nB
     End If
@@ -1473,11 +1497,11 @@ Public Function MatrixSubtract(ByRef A As Variant, ByRef B As Variant) As Double
     Dim result() As Double
     ReDim result(1 To mA, 1 To nA)
     Dim i As Long, j As Long
-    Dim rA0 As Long: rA0 = LBound(A, 1): Dim cA0 As Long: cA0 = LBound(A, 2)
-    Dim rB0 As Long: rB0 = LBound(B, 1): Dim cB0 As Long: cB0 = LBound(B, 2)
+    Dim rA0 As Long: rA0 = LBound(matA, 1): Dim cA0 As Long: cA0 = LBound(matA, 2)
+    Dim rB0 As Long: rB0 = LBound(matB, 1): Dim cB0 As Long: cB0 = LBound(matB, 2)
     For i = 1 To mA
         For j = 1 To nA
-            result(i, j) = A(rA0 + i - 1, cA0 + j - 1) - B(rB0 + i - 1, cB0 + j - 1)
+            result(i, j) = matA(rA0 + i - 1, cA0 + j - 1) - matB(rB0 + i - 1, cB0 + j - 1)
         Next j
     Next i
     MatrixSubtract = result
@@ -1487,9 +1511,11 @@ End Function
 Public Function MatrixHadamard(ByRef A As Variant, ByRef B As Variant) As Double()
     ValidateMatrix A, "A"
     ValidateMatrix B, "B"
+    Dim matA As Variant: matA = AsVariantMatrix(A)
+    Dim matB As Variant: matB = AsVariantMatrix(B)
     Dim mA As Long, nA As Long, mB As Long, nB As Long
-    mA = MatrixRows(A): nA = MatrixCols(A)
-    mB = MatrixRows(B): nB = MatrixCols(B)
+    mA = MatrixRows(matA): nA = MatrixCols(matA)
+    mB = MatrixRows(matB): nB = MatrixCols(matB)
     If mA <> mB Or nA <> nB Then
         Err.Raise ERR_HADAMARD_MISMATCH, "MatrixHadamard", "矩阵维度不匹配。"
     End If
@@ -1497,11 +1523,11 @@ Public Function MatrixHadamard(ByRef A As Variant, ByRef B As Variant) As Double
     Dim result() As Double
     ReDim result(1 To mA, 1 To nA)
     Dim i As Long, j As Long
-    Dim rA0 As Long: rA0 = LBound(A, 1): Dim cA0 As Long: cA0 = LBound(A, 2)
-    Dim rB0 As Long: rB0 = LBound(B, 1): Dim cB0 As Long: cB0 = LBound(B, 2)
+    Dim rA0 As Long: rA0 = LBound(matA, 1): Dim cA0 As Long: cA0 = LBound(matA, 2)
+    Dim rB0 As Long: rB0 = LBound(matB, 1): Dim cB0 As Long: cB0 = LBound(matB, 2)
     For i = 1 To mA
         For j = 1 To nA
-            result(i, j) = A(rA0 + i - 1, cA0 + j - 1) * B(rB0 + i - 1, cB0 + j - 1)
+            result(i, j) = matA(rA0 + i - 1, cA0 + j - 1) * matB(rB0 + i - 1, cB0 + j - 1)
         Next j
     Next i
     MatrixHadamard = result
@@ -1511,8 +1537,9 @@ End Function
 ' normType: "1" = 1-范数 (列和最大), "inf" = Z_SYM范数 (行和最大), "fro" = Frobenius 范数 (默认)
 Public Function MatrixNorm(ByRef A As Variant, Optional ByVal normType As String = "fro") As Double
     ValidateMatrix A, "A"
+    Dim matA As Variant: matA = AsVariantMatrix(A)
     Dim m As Long, n As Long, i As Long, j As Long
-    m = MatrixRows(A): n = MatrixCols(A)
+    m = MatrixRows(matA): n = MatrixCols(matA)
 
     Select Case LCase$(normType)
         Case "1"
@@ -1521,7 +1548,7 @@ Public Function MatrixNorm(ByRef A As Variant, Optional ByVal normType As String
             For j = 1 To n
                 colSum = 0#
                 For i = 1 To m
-                    colSum = colSum + Abs(A(LBound(A, 1) + i - 1, LBound(A, 2) + j - 1))
+                    colSum = colSum + Abs(matA(LBound(matA, 1) + i - 1, LBound(matA, 2) + j - 1))
                 Next i
                 If colSum > maxColSum Then maxColSum = colSum
             Next j
@@ -1532,13 +1559,13 @@ Public Function MatrixNorm(ByRef A As Variant, Optional ByVal normType As String
             For i = 1 To m
                 rowSum = 0#
                 For j = 1 To n
-                    rowSum = rowSum + Abs(A(LBound(A, 1) + i - 1, LBound(A, 2) + j - 1))
+                    rowSum = rowSum + Abs(matA(LBound(matA, 1) + i - 1, LBound(matA, 2) + j - 1))
                 Next j
                 If rowSum > maxRowSum Then maxRowSum = rowSum
             Next i
             MatrixNorm = maxRowSum
         Case Else ' "fro"
-            MatrixNorm = MatrixFrobeniusNorm(A)
+            MatrixNorm = MatrixFrobeniusNorm(matA)
     End Select
 End Function
 
@@ -1598,15 +1625,18 @@ Public Sub LUDecomposition(ByRef A() As Double, _
     ReDim L(1 To n, 1 To n)
     ReDim U(1 To n, 1 To n)
 
-    ' 计算相对容差 (基于矩阵最大绝对值)
+    ' 计算相对容差 (基于矩阵最大绝对值, 纯相对 — 不抬升小量级矩阵)
     Dim pivotTol As Double: pivotTol = 0#
     For i = 1 To n
         For j = 1 To n
             If Abs(work(i, j)) > pivotTol Then pivotTol = Abs(work(i, j))
         Next j
     Next i
-    pivotTol = pivotTol * NUM_EPSILON * CDbl(n)
-    If pivotTol < NUM_EPSILON Then pivotTol = NUM_EPSILON
+    If pivotTol = 0# Then
+        pivotTol = NUM_EPSILON  ' 零矩阵: 绝对下限保证奇异判定
+    Else
+        pivotTol = pivotTol * NUM_EPSILON * CDbl(n)
+    End If
 
     For k = 1 To n
         ' 部分主元: 在第 k 列中找绝对值最大的行
@@ -1678,7 +1708,6 @@ End Sub
 Public Sub CholeskyDecomposition(ByRef A() As Double, ByRef L() As Double)
     Dim n As Long, j As Long, k As Long, i As Long
     Dim s As Double, tmp As Double
-    Dim maxDiag As Double
 
     ValidateMatrix A, "A"
     n = MatrixRows(A)
@@ -1710,15 +1739,6 @@ Public Sub CholeskyDecomposition(ByRef A() As Double, ByRef L() As Double)
 
     ReDim L(1 To n, 1 To n)
 
-    ' 计算 A 对角元最大绝对值作为正定性容差参考
-    maxDiag = 0#
-    Dim diagIdx As Long
-    For diagIdx = 1 To n
-        If Abs(A(LBound(A, 1) + diagIdx - 1, LBound(A, 2) + diagIdx - 1)) > maxDiag Then
-            maxDiag = Abs(A(LBound(A, 1) + diagIdx - 1, LBound(A, 2) + diagIdx - 1))
-        End If
-    Next diagIdx
-
     For j = 1 To n
         ' 非对角元素: L(j, k) = (A(j,k) - Σ L(j,i)·L(k,i)) / L(k,k)
         For k = 1 To j - 1
@@ -1735,13 +1755,13 @@ Public Sub CholeskyDecomposition(ByRef A() As Double, ByRef L() As Double)
             s = s - L(j, i) * L(j, i)
         Next i
 
-        ' 正定性检查: 使用最大对角元作为相对容差 (比单列对角元更稳定)
-        If s <= NUM_EPSILON * maxDiag Then
+        ' 正定性检查: 对齐 LAPACK dpotrf 精确判定 (s <= 0 才失败),
+        ' 避免相对容差误拒高条件数 SPD 矩阵 (如 diag(1e10, 1e-8))
+        If s <= 0# Then
             Err.Raise ERR_NOT_POS_DEF, "CholeskyDecomposition", _
                 "矩阵非正定: 对角元素 s[" & j & "]=" & s & " <= 0。"
         End If
         L(j, j) = Sqr(s)
-        If L(j, j) > maxDiag Then maxDiag = L(j, j)
     Next j
 End Sub
 
@@ -1826,20 +1846,21 @@ Public Function SolveLinearSystem(ByRef A As Variant, ByRef b As Variant, _
                               Optional ByVal tolerance As Double = -1#) As Double()
     Dim m As Long, n As Long
     ValidateMatrix A, "A"
+    Dim matB As Variant: matB = AsVariantMatrix(b)  ' Range → Value 归一化
     m = MatrixRows(A): n = MatrixCols(A)
 
     ' 检测并处理 b 的维度 (1D 或 2D) (#37)
     Dim bIs1D As Boolean: bIs1D = True
     Err.Clear: On Error Resume Next
-    Dim bProbe As Long: bProbe = UBound(b, 2)
+    Dim bProbe As Long: bProbe = UBound(matB, 2)
     bIs1D = (Err.Number <> 0)
     On Error GoTo 0
 
     Dim lbB As Long, ubB As Long
     If bIs1D Then
-        lbB = LBound(b): ubB = UBound(b)
+        lbB = LBound(matB): ubB = UBound(matB)
     Else
-        lbB = LBound(b, 1): ubB = UBound(b, 1)
+        lbB = LBound(matB, 1): ubB = UBound(matB, 1)
     End If
     If ubB - lbB + 1 <> m Then
         Err.Raise ERR_SOLVE_MISMATCH, "SolveLinearSystem", _
@@ -1851,9 +1872,9 @@ Public Function SolveLinearSystem(ByRef A As Variant, ByRef b As Variant, _
     ReDim b2D(1 To m, 1 To 1)
     For i = 1 To m
         If bIs1D Then
-            b2D(i, 1) = b(lbB + i - 1)
+            b2D(i, 1) = matB(lbB + i - 1)
         Else
-            b2D(i, 1) = b(lbB + i - 1, LBound(b, 2))
+            b2D(i, 1) = matB(lbB + i - 1, LBound(matB, 2))
         End If
     Next i
 
@@ -1944,7 +1965,7 @@ End Function
 '=============================================================================
 Public Function MatrixConditionNumber(ByRef A As Variant, _
                                       Optional ByVal tol As Double = DEFAULT_TOL, _
-                                      Optional ByVal maxSweeps As Variant = MAX_SWEEPS) As Double
+                                      Optional ByVal maxSweeps As Long = MAX_SWEEPS) As Double
 
     Dim matA() As Double: matA = ToDoubleMatrix(A)
     Dim U() As Double, S() As Double, Vt() As Double
@@ -2249,7 +2270,7 @@ Public Function PolyFit(ByRef rngX As Variant, ByRef rngY As Variant, _
             s = s - Rmat(row, col) * coeffs(col)
         Next col
         ' 标度感知容差以 R(1,1) 为参考 (QR 分解中通常最大)
-        If Abs(Rmat(row, row)) < 1E-14 * (1# + Abs(Rmat(1, 1))) Then
+        If Abs(Rmat(row, row)) < TOL_RANK_DEFICIENT * (1# + Abs(Rmat(1, 1))) Then
             coeffs(row) = 0#
         Else
             coeffs(row) = s / Rmat(row, row)

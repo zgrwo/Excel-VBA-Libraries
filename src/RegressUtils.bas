@@ -1250,7 +1250,7 @@ Public Function ANOVAOneWay(ByVal data As Variant, _
     Dim groups As Object
     Dim r As Long, v As Variant, key As Variant
     Dim allValues() As Double
-    Dim grandSum As Double, grandSumSq As Double
+    Dim grandSum As Double
     Dim idx As Long
     Dim grp As Object
     Dim val As Double
@@ -1300,7 +1300,7 @@ Public Function ANOVAOneWay(ByVal data As Variant, _
 
     ' 计算组内统计
     ReDim allValues(1 To n)
-    grandSum = 0#: grandSumSq = 0#
+    grandSum = 0#
     idx = 0
 
     For r = firstDataRow To numRows
@@ -1312,7 +1312,6 @@ Public Function ANOVAOneWay(ByVal data As Variant, _
             idx = idx + 1
             allValues(idx) = val
             grandSum = grandSum + val
-            grandSumSq = grandSumSq + val * val
             Set grp = groups(key)
             grp("count") = grp("count") + 1
             grp("sum") = grp("sum") + val

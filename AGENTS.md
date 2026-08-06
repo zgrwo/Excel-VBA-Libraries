@@ -150,6 +150,7 @@ ExcelVBA函数库/
 
 | 场景 | 命令 |
 | :--- | :--- |
+| 环境检查 | `python scripts/doctor.py` |
 | 快速验证 | `python tests/run_all_validation.py --quick` |
 | 全量验证 | `python tests/run_all_validation.py` |
 | 交叉验证 | `python tests/run_all_crossval.py`（需 Excel） |

@@ -1,5 +1,5 @@
 ---
-name: python
+name: python-SKILL
 description: >
   Python development for Excel COM automation, numpy/scipy cross-validation,
   and test infrastructure. Use when writing pywin32 Excel automation scripts,

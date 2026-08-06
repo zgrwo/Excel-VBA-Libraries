@@ -142,7 +142,7 @@ Private Function ParseObject(ByRef st As TJsonState) As Object
             "JSON 嵌套深度超过限制 (" & MAX_JSON_DEPTH & ")"
     End If
 
-    Set dict = DP.Create()
+    Set dict = DP.Create(vbBinaryCompare)  ' RFC 8259: JSON 键大小写敏感
     ExpectChar st, "{"
     SkipWhitespace st
     If PeekChar(st) = "}" Then
@@ -562,7 +562,18 @@ Public Function JsonGet(ByVal json As Variant, ByVal path As Variant) As Variant
                 If Not IsArray(current) Then
                     Err.Raise ERR_PATH_NOT_FOUND, "JsonUtils", "期望数组"
                 End If
-                VarLetSet current, current(CLng(seg))
+                ' 严格整数校验 (拒绝 CLng 银行家舍入) + 边界检查 + Long 溢出防护
+                Dim idxD As Double: idxD = CDbl(seg)
+                If idxD <> Int(idxD) Or idxD < 0# Or idxD > 2147483647# Then
+                    Err.Raise ERR_INVALID_PATH, "JsonUtils", _
+                        "无效的数组索引 [" & seg & "] — 需要非负整数"
+                End If
+                Dim idx As Long: idx = CLng(idxD)
+                If idx > UBound(current) Then
+                    Err.Raise ERR_PATH_NOT_FOUND, "JsonUtils", _
+                        "数组索引 [" & seg & "] 越界 (上界 " & UBound(current) & ")"
+                End If
+                VarLetSet current, current(idx)
             End If
             p = brEnd + 1
         Else
@@ -624,7 +635,7 @@ Public Sub JsonToRange(ByVal json As String, ByRef startCell As Range)
     nRows = UBound(items) - LBound(items) + 1
     If nRows = 0 Then Exit Sub
 
-    Set allKeys = DP.Create()
+    Set allKeys = DP.Create(vbBinaryCompare)  ' JSON 键大小写敏感
     For i = LBound(items) To UBound(items)
         If IsObject(items(i)) Then
             For Each key In items(i).Keys

@@ -219,6 +219,15 @@ TEST_CASES = [
      "args": lambda: ([[1, 2], [2, 4]],), "py_ref": lambda a: 0.0, "result_type": "scalar", "tol": 1e-8},
     {"name": "MatrixDeterminant_1x1", "func": "MatrixDeterminant",
      "args": lambda: ([[7.0]],), "py_ref": lambda a: 7.0, "result_type": "scalar", "tol": 1e-8},
+    # L-01 回归: 小量级良态矩阵不得被误判奇异 (相对容差, 无绝对下限抬升)
+    {"name": "MatrixDeterminant_small_scale", "func": "MatrixDeterminant",
+     "args": lambda: ([[1e-20, 0.0], [0.0, 1e-20]],),
+     "py_ref": lambda a: 1e-40, "result_type": "scalar", "tol": 1e-50},
+    # L-02 回归: 高条件数 SPD 矩阵 diag(1e10,1e-8) 必须可 Cholesky 分解
+    {"name": "UDF_LINALG_CHOLESKY_high_cond", "func": "UDF_LINALG_CHOLESKY",
+     "args": lambda: ([[1e10, 0.0], [0.0, 1e-8]],),
+     "py_ref": lambda a: np.linalg.cholesky(np.array(a[0])),
+     "result_type": "array", "tol": 1e-9, "is_udf": True},
 
     # ---- MatrixTrace edge ----
     {"name": "MatrixTrace_1x1", "func": "MatrixTrace",

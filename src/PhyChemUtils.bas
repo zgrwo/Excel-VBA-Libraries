@@ -136,12 +136,51 @@ Private Function ParseFormulaRecursive(ByVal formula As String, _
             ParseFormulaRecursive = total
             Exit Function
         ElseIf ch = "+" Or ch = ChrW$(&HB7) Or ch = "." Then
-            ' 水合物连接符 (+ / · / .) — 递归求和（主式 + 系数×水合物）
-            ' 解析水合物系数 (如 CuSO4·5H2O 中的 5)，默认为 1
+            ' 水合物/加合物连接符 (+ / · / .) — 系数仅作用于下一个顶层单元,
+            ' 随后由循环继续累加后续单元 (避免多连接符时系数嵌套:
+            ' 如 A·2B·3C = A + 2×B + 3×C, 而非 A + 2×(B + 3×C))
             pos = pos + 1
             count = ParseNumberAt(formula, pos)
             If count = 0 Then count = 1
-            total = total + ParseFormulaRecursive(formula, elementDict, pos) * count
+            ' 下一单元为括号组或元素序列 — 继续循环解析并乘以系数
+            Dim segMass As Double
+            If pos <= n Then
+                ch = Mid$(formula, pos, 1)
+                If ch = "(" Or ch = "[" Or ch = "{" Then
+                    Select Case ch
+                        Case "(": closeChar = ")"
+                        Case "[": closeChar = "]"
+                        Case "{": closeChar = "}"
+                    End Select
+                    pos = pos + 1
+                    segMass = ParseFormulaRecursive(formula, elementDict, pos)
+                    If pos > n Then
+                        Err.Raise ERR_PARSE_MISSING_CLOSE, "MolecularWeight", _
+                            "缺少 '" & closeChar & "'"
+                    End If
+                    If Mid$(formula, pos, 1) <> closeChar Then
+                        Err.Raise ERR_PARSE_BRACKET_MISMATCH, "MolecularWeight", _
+                            "期望 '" & closeChar & "'"
+                    End If
+                    pos = pos + 1
+                    Dim grpCount As Long: grpCount = ParseNumberAt(formula, pos)
+                    If grpCount = 0 Then grpCount = 1
+                    segMass = segMass * grpCount
+                Else
+                    ' 元素序列: 解析到下一个连接符或字符串末尾
+                    Dim segStart As Long: segStart = pos
+                    Do While pos <= n
+                        ch = Mid$(formula, pos, 1)
+                        If ch = "+" Or ch = ChrW$(&HB7) Or ch = "." Then Exit Do
+                        pos = pos + 1
+                    Loop
+                    Dim segPos As Long: segPos = segStart
+                    segMass = ParseFormulaRange(formula, elementDict, segPos, pos)
+                End If
+            Else
+                segMass = 0#
+            End If
+            total = total + segMass * count
         ElseIf ch >= "A" And ch <= "Z" Then
             elem = ch
             pos = pos + 1
@@ -183,6 +222,16 @@ Private Function ParseNumberAt(ByVal s As String, ByRef pos As Long) As Long
         End If
     Loop
     ParseNumberAt = nVal
+End Function
+
+' 解析公式片段 [startPos, endPos) 的质量 (用于连接符后的元素序列单元,
+' 片段内不含连接符; 括号组仍可嵌套)
+Private Function ParseFormulaRange(ByVal formula As String, _
+    ByVal elementDict As Object, ByRef startPos As Long, ByVal endPos As Long) As Double
+    Dim seg As String
+    seg = Mid$(formula, startPos, endPos - startPos)
+    Dim segPos As Long: segPos = 1
+    ParseFormulaRange = ParseFormulaRecursive(seg, elementDict, segPos)
 End Function
 
 ' ============================================================================
@@ -355,6 +404,7 @@ End Function
 ' Public VBA 函数 — 质量与物质的量换算
 ' ============================================================================
 
+' 单位约定: mass 单位 g, molWeight 单位 g/mol
 Public Function MassToMoles(ByVal mass As Double, ByVal molWeight As Double) As Variant
     If mass < 0 Or molWeight <= 0 Then
         Err.Raise ERR_INVALID_INPUT, "MassToMoles", "质量和摩尔质量必须为非负数。"
@@ -362,6 +412,7 @@ Public Function MassToMoles(ByVal mass As Double, ByVal molWeight As Double) As 
     MassToMoles = mass / molWeight
 End Function
 
+' 单位约定: moles 单位 mol, molWeight 单位 g/mol, 结果单位 g
 Public Function MolesToMass(ByVal moles As Double, ByVal molWeight As Double) As Variant
     If moles < 0 Or molWeight <= 0 Then
         Err.Raise ERR_INVALID_INPUT, "MolesToMass", "物质的量和摩尔质量必须为非负数。"
@@ -513,6 +564,7 @@ End Function
 ' ============================================================================
 
 ' 参数中任意两项传入数值，待求项传入 Empty，返回解
+' 单位约定: mass 单位 g, volume 单位 mL, density_val 单位 g/mL
 ' 例如：Density(10#, 2#, Empty) → 5（ρ = 10g / 2mL = 5 g/mL）
 Public Function Density(ByVal mass As Variant, ByVal volume As Variant, _
                         Optional ByVal density_val As Variant) As Variant

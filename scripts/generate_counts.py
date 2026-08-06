@@ -8,6 +8,7 @@ Scans src/*.bas for Public Function/Sub declarations and produces:
 Usage:
   python scripts/generate_counts.py           # print counts
   python scripts/generate_counts.py --update  # update docs in-place
+  python scripts/generate_counts.py --check   # exit 1 if header mismatches source
 """
 
 import re
@@ -49,6 +50,7 @@ def count_module(filepath: Path) -> tuple:
 
 def main():
     update_mode = "--update" in sys.argv
+    check_mode = "--check" in sys.argv
 
     if not SRC.exists():
         print(f"ERROR: {SRC} not found", file=sys.stderr)
@@ -75,6 +77,30 @@ def main():
     print("-" * 50)
     print(f"{'TOTAL':<25} {total_funcs:>10} {total_subs:>6} {total_funcs+total_subs:>7}")
     print(f"\nModules: {len(modules)}")
+
+    # Check mode: verify header in api-reference.md matches source counts
+    if check_mode:
+        if not API_DOC.exists():
+            print(f"\nERROR: {API_DOC} not found", file=sys.stderr)
+            sys.exit(1)
+        content = API_DOC.read_text(encoding='utf-8')
+        counts_text = f"**{len(modules)} 模块 | {total_funcs} Public Functions | {total_subs} Public Subs | 共 {total_funcs+total_subs} 个 Public 接口**"
+        m = re.search(
+            re.escape(MARKER_START) + r'\s*(.*?)\s*' + re.escape(MARKER_END),
+            content,
+            flags=re.DOTALL
+        )
+        if not m:
+            print(f"\nERROR: count markers not found in {API_DOC.name}", file=sys.stderr)
+            sys.exit(1)
+        if m.group(1).strip() != counts_text:
+            print(f"\nERROR: count header mismatch in {API_DOC.name}", file=sys.stderr)
+            print(f"  header: {m.group(1).strip()}", file=sys.stderr)
+            print(f"  actual: {counts_text}", file=sys.stderr)
+            print("  fix: python scripts/generate_counts.py --update", file=sys.stderr)
+            sys.exit(1)
+        print(f"\n[OK] Count header consistent: {counts_text}")
+        return
 
     # Update mode: inject into api-reference.md
     if update_mode:

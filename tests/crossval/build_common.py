@@ -76,6 +76,8 @@ except ImportError:
 #   result_type str   — "scalar" (default), "array", "bool", "string", "tuple"
 #   skip_if    bool    — if True, skip this test
 #   skip_reason str    — reason for skipping (printed in report)
+#   expect_error bool  — if True, the VBA call MUST raise; PASS when it does
+#   expect_err_contains str — optional substring required in the error message
 #   is_udf     bool    — if True, first arg is Range data (written to sheet)
 #   kwargs     dict    — keyword args for VBA function (passed after positional)
 # =============================================================================
@@ -207,10 +209,25 @@ class CrossValRunner:
                 tol = tc.get("tol", 1e-10)
 
             # Compare
+            if tc.get("expect_error", False):
+                self.results.append((self.module_name, tc["name"], "FAIL",
+                                     "expected VBA error but call succeeded"))
+                print(f"  FAIL  {label} — expected error, got success")
+                return
             result_type = tc.get("result_type", "scalar")
             self._compare(label, vba_result, py_val, result_type, tol, tc)
 
         except Exception as exc:
+            if tc.get("expect_error", False):
+                needle = tc.get("expect_err_contains")
+                if needle is None or needle in str(exc):
+                    self.results.append((self.module_name, tc["name"], "PASS", ""))
+                    print(f"  PASS  {label} — raised as expected")
+                else:
+                    self.results.append((self.module_name, tc["name"], "FAIL",
+                                         f"expected error containing '{needle}', got: {exc}"))
+                    print(f"  FAIL  {label} — wrong error: {exc}")
+                return
             self.results.append((self.module_name, tc["name"], "FAIL",
                                 f"exception: {exc}"))
             print(f"  FAIL  {label} — exception: {exc}")

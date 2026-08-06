@@ -79,7 +79,6 @@ Private DP As New DictProxy
 '   InsertionSortDouble  — 小数组插入排序
 '   QuickPercentile      — 对已排序数组计算百分位数
 '   TDistCritical        — t 分布临界值
-'   NormSInv             — 正态分布逆 CDF
 '=====================================================================
 
 Private Const ERR_INVALID_INPUT As Long = vbObjectError + 1001
@@ -493,6 +492,8 @@ Public Function HarmonicMean(ByRef data As Variant, Optional ByVal colIndex As L
     Dim arrV As Variant
     Dim i As Long, lb As Long, n As Long
     Dim sumRecip As Double
+    Dim kC As Double, kY As Double, kT As Double  ' Kahan compensation vars
+    kC = 0#
 
     arrV = ExtractDoubles(data, colIndex)
     If UBound(arrV) - LBound(arrV) + 1 < 1 Then
@@ -508,7 +509,8 @@ Public Function HarmonicMean(ByRef data As Variant, Optional ByVal colIndex As L
             Err.Raise ERR_INVALID_INPUT, "HarmonicMean", "所有值必须为正数。"
             Exit Function
         End If
-        sumRecip = sumRecip + 1# / arr(i)
+        ' Kahan 补偿求和 (与模块其他求和路径一致)
+        kY = 1# / arr(i) - kC: kT = sumRecip + kY: kC = (kT - sumRecip) - kY: sumRecip = kT
     Next i
     HarmonicMean = n / sumRecip
 End Function
@@ -1159,7 +1161,8 @@ Public Function Correlation( _
 
     sx = StdDevDouble(arrXD)
     sy = StdDevDouble(arrYD)
-    If sx <= TOL_DEFAULT Or sy <= TOL_DEFAULT Then
+    ' 尺度感知容差: 相对数据最大绝对值, 避免误杀小幅数据 (如 1e-14 尺度)
+    If sx <= TOL_DEFAULT * MaxAbsDouble(arrXD) Or sy <= TOL_DEFAULT * MaxAbsDouble(arrYD) Then
         Err.Raise ERR_DIV_BY_ZERO, "Correlation", "方差为零，无法计算相关系数。"
         Exit Function
     End If
@@ -1202,7 +1205,7 @@ Public Function RSquare( _
         ssResid = t
     Next i
 
-    If ssTotal < TOL_DEFAULT Then
+    If ssTotal <= TOL_DEFAULT * CDbl(n) * MaxAbsDouble(arrAD) * MaxAbsDouble(arrAD) Then
         Err.Raise ERR_DIV_BY_ZERO, "RSquare", "SS_total 为零，无法计算 R²。"
     Else
         RSquare = 1# - ssResid / ssTotal
@@ -1375,7 +1378,8 @@ Public Function ZScore( _
 
     m = MeanDouble(arr)
     s = StdDevDouble(arr)
-    If s < TOL_DEFAULT Then
+    ' 尺度感知容差: 相对数据最大绝对值, 避免误杀小幅数据
+    If s <= TOL_DEFAULT * MaxAbsDouble(arr) Then
         Err.Raise ERR_DIV_BY_ZERO, "ZScore", "标准差为零，无法计算 Z-Score。"
         Exit Function
     End If
@@ -1424,7 +1428,10 @@ Public Function Normalize( _
     Dim result() As Double
     ReDim result(lb To UBound(arr))
 
-    If rng < TOL_DEFAULT Then
+    ' 尺度感知容差: 相对数据最大绝对值, 避免误杀小幅数据
+    Dim scaleR As Double: scaleR = Abs(maxVal)
+    If Abs(minVal) > scaleR Then scaleR = Abs(minVal)
+    If rng <= TOL_DEFAULT * scaleR Then
         Err.Raise ERR_DIV_BY_ZERO, "Normalize", "范围为零，无法归一化。"
         Exit Function
     Else
@@ -1797,7 +1804,7 @@ End Function
 '=============================================================================
 
 '=============================================================================
-'===== 分布函数 (Distribution) — NormSDistCDF → NormSInv =====
+'===== 分布函数 (Distribution) — NormSDistCDF =====
 ' NormSDistCDF — 标准正态分布累积概率（ZTest 调用）
 '=============================================================================
 Private Function NormSDistCDF(ByVal z As Double) As Double
@@ -1825,6 +1832,13 @@ End Function
 ' GammaLn — 对数 Gamma 函数（Lanczos 近似）
 '=============================================================================
 Public Function GammaLn(ByVal x As Double) As Double
+    ' 域校验: Gamma 函数在非正整数处有极点 (x = 0, -1, -2, ...)
+    If x <= 0# Then
+        If x = Int(x) Then
+            Err.Raise ERR_INVALID_INPUT, "GammaLn", _
+                "x 不得为非正整数 (Gamma 函数极点), 实际为 " & x
+        End If
+    End If
     ' Lanczos coefficients (g=7, n=9)
     Static coeffs As Variant
     Dim i As Long, ser As Double, tmp As Double
@@ -1859,34 +1873,8 @@ Private Function TDistCritical(ByVal alpha As Double, ByVal df As Long) As Doubl
 End Function
 
 '=============================================================================
-' NormSInv — 正态分布逆 CDF (Moro 1995)（Private，ConfidenceInterval 调用）
+' (NormSInv 已删除 — 无调用者的死代码; ConfidenceInterval 走 TDistCritical → TInv2T 路径)
 '=============================================================================
-Private Function NormSInv(ByVal p As Double) As Double
-    Static a As Variant, b As Variant, c As Variant
-    Static initialized As Boolean
-    If Not initialized Then
-        a = Array(2.50662823884, -18.61500062529, 41.39119773534, -25.44106049637)
-        b = Array(-8.4735109309, 23.08336743743, -21.06224101826, 3.13082909833)
-        c = Array(0.337475482272615, 0.976169019091719, 0.160797971491821, _
-                 0.0276438810333863, 0.0038405729373609, 0.0003951896511919, _
-                 3.21767881767818E-05, 2.888167364E-07, 3.960315187E-10)
-        initialized = True
-    End If
-    Dim y As Double, r As Double, x As Double
-    y = p - 0.5
-    If Abs(y) < 0.42 Then
-        r = y * y
-        x = y * (((a(3) * r + a(2)) * r + a(1)) * r + a(0)) / _
-                ((((b(3) * r + b(2)) * r + b(1)) * r + b(0)) * r + 1#)
-    Else
-        If y < 0# Then r = p Else r = 1# - p
-        r = Log(-Log(r))
-        x = c(0) + r * (c(1) + r * (c(2) + r * (c(3) + r * (c(4) + _
-            r * (c(5) + r * (c(6) + r * (c(7) + r * c(8))))))))
-        If y < 0# Then x = -x
-    End If
-    NormSInv = x
-End Function
 
 '=============================================================================
 ' BetaReg — 正则化不完全 Beta 函数 I_x(a,b)（连分式展开）
@@ -1944,6 +1932,11 @@ Private Function BetaCF(ByVal a As Double, ByVal b As Double, ByVal x As Double)
 End Function
 
 Public Function BetaReg(ByVal x As Double, ByVal a As Double, ByVal b As Double) As Double
+    ' 域校验: a, b 必须为正 (GammaLn 在 0/负整数无定义)
+    If a <= 0# Or b <= 0# Then
+        Err.Raise ERR_INVALID_INPUT, "BetaReg", _
+            "参数 a, b 必须为正数, 实际 a=" & a & ", b=" & b
+    End If
     If x < 0# Or x > 1# Then BetaReg = -1#: Exit Function
     If x = 0# Then BetaReg = 0#: Exit Function
     If x = 1# Then BetaReg = 1#: Exit Function
@@ -2020,6 +2013,18 @@ Public Function TInv2T(ByVal alpha As Double, ByVal df As Long) As Double
 End Function
 
 '=============================================================================
+'=============================================================================
+' MaxAbsDouble — 数组最大绝对值 (尺度感知容差的参考尺度)
+'=============================================================================
+Private Function MaxAbsDouble(ByRef arr() As Double) As Double
+    Dim i As Long, m As Double
+    m = 0#
+    For i = LBound(arr) To UBound(arr)
+        If Abs(arr(i)) > m Then m = Abs(arr(i))
+    Next i
+    MaxAbsDouble = m
+End Function
+
 ' QuickSortDouble — Hybrid QuickSort + InsertionSort for Double arrays (in-place, ascending)
 ' QuickSort for n>16, InsertionSort for n<=16. Recurses on smaller partition first → O(log n) stack.
 '=============================================================================
@@ -2041,7 +2046,12 @@ Private Sub QuickSortDouble(ByRef arr() As Double, ByVal low As Long, ByVal high
     End If
 
     lo = low: hi = high
-    pivot = arr((low + high) \ 2)
+    ' 三数取中选轴 (SKILL §5.1): 避免中点轴在山形/模式化数据上退化 O(n²)
+    Dim mid As Long: mid = (low + high) \ 2
+    If arr(low) > arr(mid) Then tmp = arr(low): arr(low) = arr(mid): arr(mid) = tmp
+    If arr(low) > arr(high) Then tmp = arr(low): arr(low) = arr(high): arr(high) = tmp
+    If arr(mid) > arr(high) Then tmp = arr(mid): arr(mid) = arr(high): arr(high) = tmp
+    pivot = arr(mid)
     Do While lo <= hi
         Do While arr(lo) < pivot: lo = lo + 1: Loop
         Do While arr(hi) > pivot: hi = hi - 1: Loop

@@ -83,7 +83,14 @@ Public Function Merge(ByRef dict1 As Object, _
                       Optional ByVal overwrite As Boolean = False) As Object
     Dim result As Object, key As Variant
     Dim item1 As Variant, item2 As Variant, item3 As Variant
-    Set result = Create()
+    ' 保留源字典的 CompareMode (避免 vbBinaryCompare 字典合并时大小写键冲突 Error 457)
+    Dim cm As Long: cm = vbTextCompare
+    If Not dict1 Is Nothing Then
+        cm = dict1.CompareMode
+    ElseIf Not dict2 Is Nothing Then
+        cm = dict2.CompareMode
+    End If
+    Set result = Create(cm)
     If Not dict1 Is Nothing Then
         For Each key In dict1.Keys
             If IsObject(dict1(key)) Then Set item1 = dict1(key) Else item1 = dict1(key)

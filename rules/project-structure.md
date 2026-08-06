@@ -67,6 +67,7 @@ ExcelVBA函数库/
 │   ├── fix_magic_numbers.py      # 魔法数字→命名常量
 │   ├── pre-commit                # Git pre-commit hook
 │   ├── check_project_structure.py # 项目结构校验（被 hook 调用）
+│   ├── doctor.py                 # 环境就绪检查
 │   ├── install_hooks.sh          # 安装 hook 到 .git/hooks/
 │   └── push.sh                   # 推送前校验 + 文件清单 + 推送
 ├── rules/                          # 治理规范文档（本目录）

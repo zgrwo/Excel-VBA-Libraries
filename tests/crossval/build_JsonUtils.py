@@ -151,6 +151,14 @@ TEST_CASES = [
         "py_ref": lambda a: ["a", "b"],
         "result_type": "array",
     },
+    # J-02 回归: RFC 8259 键大小写敏感 — "a"/"A" 必须保留为两个键
+    {
+        "name": "JsonGetKeys_case_sensitive",
+        "func": "JsonGetKeys",
+        "args": lambda: ('{"a":1,"A":2}',),
+        "py_ref": lambda a: ["a", "A"],
+        "result_type": "array",
+    },
     {
         "name": "JsonGetKeys_empty_object",
         "func": "JsonGetKeys",
