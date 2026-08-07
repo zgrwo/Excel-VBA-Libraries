@@ -4,7 +4,7 @@
 # Usage: bash scripts/install_hooks.sh
 #
 # Currently installs:
-#   pre-commit — check new files against agents.md project structure
+#   pre-commit — check new files against AGENTS.md project structure
 
 set -e
 

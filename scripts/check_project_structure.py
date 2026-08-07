@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Check staged files against the project structure defined in agents.md.
+Check staged files against the project structure defined in AGENTS.md.
 
 Called by .git/hooks/pre-commit. Reads the list of staged files from git
-diff --cached, compares against the project structure tree in agents.md,
+diff --cached, compares against the project structure tree in AGENTS.md,
 and exits non-zero if any added file is not defined.
 """
 

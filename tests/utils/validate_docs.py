@@ -2,7 +2,7 @@
 
 Validates 15 checks across 4 layers:
   Layer 1: Function signature consistency (src/*.bas ↔ docs/)
-  Layer 2: Documentation cross-references (agents.md ↔ SKILL.md ↔ manuals)
+  Layer 2: Documentation cross-references (AGENTS.md ↔ SKILL.md ↔ manuals)
   Layer 3: Metadata hygiene (module counts, date stamps, file existence)
   Layer 4: Code quality smells (private copies, deprecated in use, thin wrappers)
 
@@ -29,7 +29,7 @@ VBA_CORE = ROOT / "VBA-Core"
 API_DOC = RULES / "api-reference.md"
 USER_MANUAL = RULES / "user-manual.md"
 USER_MANUAL_EN = DOCS / "VBA_LIB_User_Manual_EN.md"
-CLAUDE_MD = ROOT / "agents.md"  # renamed: was CLAUDE.md, now agents.md
+CLAUDE_MD = ROOT / "AGENTS.md"  # renamed: was CLAUDE.md, now AGENTS.md
 README_MD = ROOT / "README.md"
 SKILL_MD = SKILLS / "vba-SKILL.md"
 MANUAL_AUTHORING_MD = SKILLS / "vba-manual-authoring.md"
@@ -305,14 +305,14 @@ def check_udf_no_byref():
 # ── Layer 2: Documentation Cross-References ──────────────────────────────
 
 def check_section_refs():
-    """Verify all § references in agents.md resolve in SKILL.md / manual-authoring.md."""
+    """Verify all § references in AGENTS.md resolve in SKILL.md / manual-authoring.md."""
     result = CheckResult()
     claude = _load(CLAUDE_MD)
     skill = _load(SKILL_MD) or ""
     man_auth = _load(MANUAL_AUTHORING_MD) or ""
 
     if not claude:
-        result.add_fail("agents.md not found")
+        result.add_fail("AGENTS.md not found")
         return result
 
     refs = set(re.findall(r'§([0-9]+(?:\.[0-9]+)*)', claude))
@@ -395,7 +395,7 @@ def check_module_counts():
     # Check for hard-coded "N/N 模块" patterns that drift
     stale = re.findall(r'(\d+/\d+\s*模块)', claude)
     for s in stale:
-        result.add_fail(f"agents.md: stale count '{s}'")
+        result.add_fail(f"AGENTS.md: stale count '{s}'")
     if not stale:
         result.add_pass()
 
@@ -442,11 +442,11 @@ def check_last_updated():
 
 
 def check_routing_table():
-    """Verify all files referenced in agents.md routing table exist."""
+    """Verify all files referenced in AGENTS.md routing table exist."""
     result = CheckResult()
     claude = _load(CLAUDE_MD)
     if not claude:
-        result.add_fail("agents.md not found")
+        result.add_fail("AGENTS.md not found")
         return result
 
     refs = set(re.findall(r'`(skills/\S+\.md|docs/\S+\.md)`', claude, re.IGNORECASE))
@@ -457,7 +457,7 @@ def check_routing_table():
         if full.exists() or ref in known_deferred:
             result.add_pass()
         else:
-            result.add_fail(f"agents.md routing table: '{ref}' does not exist")
+            result.add_fail(f"AGENTS.md routing table: '{ref}' does not exist")
     return result
 
 

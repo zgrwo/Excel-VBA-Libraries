@@ -1,5 +1,5 @@
 #!/bin/bash
-# Git pre-commit hook — check new files against agents.md project structure.
+# Git pre-commit hook — check new files against AGENTS.md project structure.
 #
 # Installed by: bash scripts/install_hooks.sh
 # Requires: Python 3 (for structure parser)
