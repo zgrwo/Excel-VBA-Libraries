@@ -81,7 +81,7 @@ P2 模块列表：ArrayUtils / DictSetUtils / PivotUtils / DateTimeUtils / Range
 
 # 审查维度
 
-逐项给出发现，无发现则明确写"未发现风险"。详细检查清单见 `docs/review-checklist.md`，以下仅列出各维度重点和项目特异要求：
+逐项给出发现，无发现则明确写"未发现风险"。详细检查清单见 docs/review-checklist.md（本地审查工作区文件，不入库），以下仅列出各维度重点和项目特异要求：
 
 ## 维度 1 — 架构与模块耦合
 

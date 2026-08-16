@@ -33,10 +33,10 @@
 
 | # | 陷阱 | 权威定义处 |
 |---|------|-----------|
-| 11 | **.NET Framework 4.8 使用 `record` 需 `IsExternalInit` polyfill** | [csharp-SKILL.md](../skills/csharp-SKILL.md)（双 TFM / IsExternalInit 章节） |
-| 12 | **Pydantic v2 不兼容位置参数**（模型构造必须关键字参数） | [python-SKILL.md](../skills/python-SKILL.md) §8.5 |
-| 13 | **VBA 不支持 `Optional ByRef` 数组参数** | [vba-SKILL.md](../skills/vba-SKILL.md) §4.0 |
-| 14 | **移除 NuGet 包后 .dna 中对应 DLL 引用残留** | [csharp-SKILL.md](../skills/csharp-SKILL.md)（Excel-DNA 章节） |
+| 11 | **.NET Framework 4.8 使用 `record` 需 `IsExternalInit` polyfill** | csharp-SKILL.md（双 TFM / IsExternalInit 章节） |
+| 12 | **Pydantic v2 不兼容位置参数**（模型构造必须关键字参数） | python-SKILL.md §8.5 |
+| 13 | **VBA 不支持 `Optional ByRef` 数组参数** | vba-SKILL.md §4.0 |
+| 14 | **移除 NuGet 包后 .dna 中对应 DLL 引用残留** | csharp-SKILL.md（Excel-DNA 章节） |
 
 ## 提交前自查
 

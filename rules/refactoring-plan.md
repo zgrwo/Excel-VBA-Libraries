@@ -122,7 +122,7 @@
 | 添加 LICENSE | `LICENSE`（MIT） | 文件存在 | — |
 | 添加 CONTRIBUTING.md | `CONTRIBUTING.md` | 含导入顺序/开发流程/PR 规范 | — |
 | 添加 CHANGELOG.md | `CHANGELOG.md`（keepachangelog） | 含历史版本记录 | — |
-| GitHub Actions CI | `.github/workflows/vba-lint.yml` | PR 自动运行 lint + 锚点 + 计数 | — |
+| GitHub Actions CI | `.github/workflows/ci.yml` | PR 自动运行 lint + 锚点 + 计数 | — |
 | Issue/PR 模板 | `.github/ISSUE_TEMPLATE/` | bug/feature 模板 | — |
 | VBA 静态检查脚本 | `scripts/vba_lint.py` | 检测 Err.Raise 拼写/IIf/ReDim(1 To 0) | Phase 0 |
 | 修复所有现存 lint 问题 | 源码修复 | lint 零警告 | Phase 0 |
@@ -151,9 +151,9 @@ RULES = [
 | 任务 | 产出 | 验收标准 | 依赖 |
 |------|------|----------|------|
 | 函数计数自动生成 | `scripts/generate_counts.py` | 从源码提取，自动更新文档 | Phase 1 |
-| 锚点校验集成 CI | `scripts/validate_anchors.py` | PR 自动运行 | — |
+| 锚点校验集成 CI | `tests/utils/validate_manual_anchors.py` | PR 自动运行 | — |
 | API 文档签名提取 | `scripts/generate_api_docs.py` | 从 VBA 注释提取签名行 | — |
-| 手册示例验证（可选） | `scripts/verify_manual.py` | 提取示例代码并验证 | Phase 1 |
+| 手册示例验证（可选） | tests/utils/validate_manual_anchors.py（手册锚点校验） | 提取示例代码并验证 | Phase 1 |
 | @Description 注解规范 | `docs/annotation-guide.md` | 为 Rubberduck 兼容做准备 | — |
 
 **回滚策略**：文档生成脚本是独立工具，不影响源码。

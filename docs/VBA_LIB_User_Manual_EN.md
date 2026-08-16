@@ -2,7 +2,7 @@
 
 <!-- last_updated: 2026-06-17 -->
 
-> [User Manual (CN)](VBA_LIB_User_Manual.md) | [API Reference](VBA_LIB_Documentation.md)
+> [User Manual (CN)](../rules/user-manual.md) | [API Reference](../rules/api-reference.md)
 
 ## Table of Contents
 

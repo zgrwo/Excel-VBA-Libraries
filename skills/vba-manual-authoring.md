@@ -20,8 +20,8 @@ one place — all others link to it.
 | # | Document | Audience | Core Question | Type |
 |---|----------|----------|---------------|------|
 | 1 | `README.md` | Humans (all) | "What is this? Can it solve my problem?" | Project storefront + nav hub |
-| 2 | `docs/VBA_LIB_User_Manual.md` | Human users | "I want to do X — what formula?" | Recipe-driven user guide |
-| 3 | `docs/VBA_LIB_Documentation.md` | Humans + AI | "What functions exist? What are their signatures?" | **Single source of truth** for function signatures |
+| 2 | `rules/user-manual.md` | Human users | "I want to do X — what formula?" | Recipe-driven user guide |
+| 3 | `rules/api-reference.md` | Humans + AI | "What functions exist? What are their signatures?" | **Single source of truth** for function signatures |
 | 4 | `skills/*/SKILL.md` | AI assistant | "How should I write VBA/Python/SQL code?" | On-demand SOP, loaded per task type |
 | 5 | `AGENTS.md` | AI assistant | "How is the project organized? What are the red lines?" | AI constitution, **always in context** |
 
@@ -34,10 +34,10 @@ All other documents reference it by link — never by copy.
 
 | Fact type | Canonical home | Referenced by |
 |-----------|---------------|---------------|
-| Function signature | `docs/VBA_LIB_Documentation.md` | User Manual (anchor link), SKILL.md (§ ref) |
+| Function signature | `rules/api-reference.md` | User Manual (anchor link), SKILL.md (§ ref) |
 | Coding rule | `skills/vba-SKILL.md` | AGENTS.md (§ ref) |
 | Project structure, deps (含导入顺序), test commands | `AGENTS.md` | README (link) |
-| Usage recipe, parameter behavior | `docs/VBA_LIB_User_Manual.md` | API Index (cross-link) |
+| Usage recipe, parameter behavior | `rules/user-manual.md` | API Index (cross-link) |
 
 ### 0.3 Collaboration Flow
 
@@ -96,7 +96,7 @@ python tests/run_all_validation.py --quick
 
 ---
 
-The user manuals (`docs/VBA_LIB_User_Manual.md` and `docs/VBA_LIB_User_Manual_EN.md`)
+The user manuals (`rules/user-manual.md` and `docs/VBA_LIB_User_Manual_EN.md`)
 are chapter-per-module with a uniform function-entry template. All rules below
 apply to both Chinese and English editions equally.
 
@@ -391,8 +391,8 @@ consistency:
 | # | File | What to update |
 |---|------|---------------|
 | 1 | `src/<Module>.bas` | Module header function list |
-| 2 | `docs/VBA_LIB_Documentation.md` | Signature table + function count（唯一计数信源） |
-| 3 | `docs/VBA_LIB_User_Manual.md` | Add function entry with anchor + recipe reference |
+| 2 | `rules/api-reference.md` | Signature table + function count（唯一计数信源） |
+| 3 | `rules/user-manual.md` | Add function entry with anchor + recipe reference |
 | 4 | `docs/VBA_LIB_User_Manual_EN.md` | Same as CN manual |
 | 5 | `tests/crossval/build_<module>.py` ✅ 已实现 | Crossval test cases + module registration (also `build_common.py` + `build_manual_examples.py`) |
 | 6 | All three doc files | Run `validate_manual_anchors.py` → 0 broken links |

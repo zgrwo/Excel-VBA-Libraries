@@ -70,6 +70,7 @@ ExcelVBA函数库/
 │   ├── doctor.py                 # 环境就绪检查
 │   ├── install_hooks.sh          # 安装 hook 到 .git/hooks/
 │   ├── validate-commit-msg.sh    # Conventional Commits 校验（CI 提交规范检查共用）
+│   ├── check_doc_links.py          # Markdown 链接/路径存在性检查（CI 文档门禁）
 │   └── push.sh                   # 推送前校验 + 文件清单 + 推送
 ├── rules/                          # 治理规范文档（本目录）
 │   ├── project-structure.md      # 📍 本文件 — 结构唯一定义
@@ -84,7 +85,8 @@ ExcelVBA函数库/
 │   ├── falsy-pitfalls.md         # Python falsy 值误判检查清单
 │   ├── sentinel-contract.md      # 哨兵契约 L1-L5 与 NaN/Inf 守卫清单
 │   ├── cross-project-synthesis.md # 跨项目共性经验与反模式库
-│   └── adr-template.md           # 架构决策记录（ADR）模板
+│   ├── adr-template.md           # 架构决策记录（ADR）模板
+│   └── adr/                         # ADR 决策记录（编号递增）
 ├── skills/                         # AI 编码规范（扁平结构）
 │   ├── vba-SKILL.md              # VBA 编码规范
 │   ├── vba-manual-authoring.md   # 手册撰写规范
