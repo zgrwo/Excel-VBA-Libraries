@@ -42,7 +42,7 @@ _Avoid_: 错误返回、UDF 错误
 **Err.Raise** — VBA 内部函数抛异常的标准方式。用于非 UDF 的内部函数，调用方通过 `On Error GoTo` 捕获。
 _Avoid_: 抛出错误、错误抛出
 
-**On Error GoTo Cleanup** — VBA 结构化错误处理模式：`On Error GoTo Cleanup` → 正常执行 → `Cleanup:` 标签 → 资源释放。用于文件/数据库等资源操作。
+**On Error GoTo ErrHandler** — VBA 结构化错误处理模式：`On Error GoTo ErrHandler`（或 `EH:`）→ 正常执行 → `ErrHandler:` 标签 → 资源释放。用于文件/数据库等资源操作。
 _Avoid_: 错误跳转、异常处理
 
 **裸 On Error Resume Next** — 🔴 反模式：`On Error Resume Next` 后不检查 `Err.Number`，静默吞没所有错误。代码审查必检项。

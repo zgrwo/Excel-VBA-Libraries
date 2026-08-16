@@ -734,6 +734,7 @@ Private Sub CollectFiles(ByRef folderObj As Object, ByVal pattern As String, ByR
     Dim file As Object
     Dim subFolder As Object
 
+    ' 空集合/不可枚举惯用法：Resume Next 探针 + 循环前 Err.Clear（Err.Number 未查为有意——空集合直接结束循环，见 vba-pitfalls）
     Err.Clear
     On Error Resume Next
     For Each file In folderObj.Files

@@ -4,7 +4,7 @@
 
 ## 1. 项目概述
 
-**Excel-VBA-Libraries** 是一个纯 VBA 实现的 Excel 函数增强库，提供 15 个功能模块、530+ 个 Public 函数，覆盖统计、线性代数、回归、物理化学、字符串、日期时间、正则、数组、字典、JSON、XML、透视表、SQL、Range 操作、文件系统等。
+**Excel-VBA-Libraries** 是一个纯 VBA 实现的 Excel 函数增强库，提供 15 个功能模块、500+ 个 Public 函数（精确计数唯一权威：rules/api-reference.md 计数头），覆盖统计、线性代数、回归、物理化学、字符串、日期时间、正则、数组、字典、JSON、XML、透视表、SQL、Range 操作、文件系统等。
 
 ### 核心价值
 
@@ -55,7 +55,7 @@
 
 - **双路径原则**：Public 函数必须同时处理 Range 对象和 Variant 数组
 - **As Variant 参数**：所有 UDF 参数声明为 `As Variant`（否则 Range 传入 #VALUE!）
-- **Err.Raise 错误处理**：UDF→CVErr，VBA 函数→Err.Raise，资源→Cleanup 标签
+- **Err.Raise 错误处理**：UDF→CVErr，VBA 函数→Err.Raise，资源→ErrHandler 标签
 - **1-based 数组**：VBA 默认 Option Base 0，但 NormalizeTo2D 统一返回 1-based
 
 ## 3. 架构规格

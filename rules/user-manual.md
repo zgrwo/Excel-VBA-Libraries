@@ -2,7 +2,7 @@
 
 <!-- last_updated: 2026-06-17 -->
 
-> English: [User Manual](VBA_LIB_User_Manual_EN.md) | [API Reference](VBA_LIB_Documentation.md)
+> English: [User Manual (EN)](../docs/VBA_LIB_User_Manual_EN.md) | [API Reference](api-reference.md)
 
 ## 目录
 

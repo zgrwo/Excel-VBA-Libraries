@@ -87,7 +87,7 @@ ExcelVBA函数库/
 ├── logs/                           # 日志
 ├── AGENTS.md                       # 本文件
 ├── README.md                       # 用户向功能指南 (CN)
-├── README_EN.md                    # 用户向功能指南 (EN)
+├── README.en.md                    # 用户向功能指南 (EN)
 └── LICENSE / CONTRIBUTING.md / ...  # 社区文件
 ```
 
@@ -102,7 +102,7 @@ ExcelVBA函数库/
 
 - UDF → `CVErr(xlErrValue)`
 - VBA 内部函数 → `Err.Raise`
-- 资源操作 → `On Error GoTo Cleanup`
+- 资源操作 → `On Error GoTo ErrHandler`（仓库实际标签约定，见 rules/context.md）
 - 🔴 禁止裸 `On Error Resume Next` 不检查 Err
 
 ### 3. 新增 Public 函数 6 处同步
@@ -116,6 +116,22 @@ ExcelVBA函数库/
 ### 5. 推送范围
 
 禁止推送 `rules/project-structure.md` 结构树之外的任何文件。
+
+### 6. 防错三原则（违反 = bug，2026-08 治理对齐）
+
+| 原则 | 核心 |
+| :--- | :--- |
+| **静默传播阻断** | 显式守卫 `NaN`/`Inf`/`Null`/`Empty`，不兜底（数值类 UDF 返回 `CVErr(xlErrNum)` 哨兵，0 是有效值） |
+| **防御完整性** | 安全机制覆盖模块所有方法（路径验证 / 超时 / 参数化；VBA 侧入口统一走 VariantKit.NormalizeInput） |
+| **异常过滤器** | 统一排除不可恢复异常；`On Error Resume Next` 必须检查 `Err.Number`（见 context.md 反模式条目） |
+
+### 7. 闭环验证强制
+
+| # | 规则 |
+|:---|:---|
+| **7.1** | **禁止自校验**：`check_close(name, X, X)` 永远为 PASS，无验证价值 |
+| **7.2** | **数值类函数必须交叉验证**：与 Python 独立参考实现（numpy/scipy）比对（tests/crossval/） |
+| **7.3** | **修改后必须运行全量验证**：`python tests/run_all_validation.py` 任一失败 = 不可提交 |
 
 ## 测试体系
 
@@ -208,6 +224,12 @@ ExcelVBA函数库/
 - 新会话先读本文件 + `skills/vba-SKILL.md`
 - 跨会话通过 git commit 衔接
 - 每个 commit 自包含、可追溯
+
+
+## AGENTS.md 生态兼容（2026-08 治理对齐）
+
+- 本文件即 `AGENTS.md`（大写）——Codex/Copilot/Windsurf/JetBrains/Gemini 直接读取
+- Claude Code 使用 `CLAUDE.md` 副本：`Copy-Item AGENTS.md CLAUDE.md`（每次修改 AGENTS.md 后重新创建）
 
 ## 参考
 

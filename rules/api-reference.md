@@ -2,7 +2,7 @@
 
 <!-- last_updated: 2026-08-01 -->
 
-> Function signature quick reference. For full usage and examples see [User Manual (CN)](VBA_LIB_User_Manual.md) / [User Manual (EN)](VBA_LIB_User_Manual_EN.md).
+> Function signature quick reference. For full usage and examples see [User Manual (CN)](user-manual.md) / [User Manual (EN)](../docs/VBA_LIB_User_Manual_EN.md).
 
 <!-- AUTO_COUNTS_START -->
 **15 模块 | 533 Public Functions | 33 Public Subs | 共 566 个 Public 接口**
