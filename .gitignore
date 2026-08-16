@@ -1,9 +1,16 @@
 # Python cache
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
 
 # CodeGraph index (machine-local)
 /.codegraph/
+
+# AI 会话产物（本地工具目录不入库，2026-08 治理对齐）
+.qoder/
+.claude/
 
 # VBA text backups (workspace-local)
 txt/
@@ -20,10 +27,6 @@ tests/benchmarks/bench_results.json
 # Code review artifacts (workspace-local, not tracked)
 docs/code-review-prompt.md
 docs/review-checklist.md
-.claude/
-
-# Better Harness report output (workspace-local, not tracked)
-.qoder/better-harness/
 
 # IDE / OS files
 .vscode/
@@ -31,7 +34,19 @@ docs/review-checklist.md
 *.swp
 *.swo
 Thumbs.db
+.DS_Store
 
 # Runtime artifacts (构建产出 / 运行日志)
 build/
 logs/
+*.log
+
+# 密钥与凭据（防意外提交，2026-08 治理对齐）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks

@@ -69,6 +69,7 @@ ExcelVBA函数库/
 │   ├── check_project_structure.py # 项目结构校验（被 hook 调用）
 │   ├── doctor.py                 # 环境就绪检查
 │   ├── install_hooks.sh          # 安装 hook 到 .git/hooks/
+│   ├── validate-commit-msg.sh    # Conventional Commits 校验（CI 提交规范检查共用）
 │   └── push.sh                   # 推送前校验 + 文件清单 + 推送
 ├── rules/                          # 治理规范文档（本目录）
 │   ├── project-structure.md      # 📍 本文件 — 结构唯一定义
@@ -78,7 +79,12 @@ ExcelVBA函数库/
 │   ├── refactoring-plan.md       # 重构计划
 │   ├── context.md                # 术语表
 │   ├── documentation.md          # 文档职责
-│   └── code-review-prompt.md     # 审查模板
+│   ├── code-review-prompt.md     # 审查模板
+│   ├── tooling-pitfalls.md       # 工具/脚本坑位清单（2026-08 治理对齐）
+│   ├── falsy-pitfalls.md         # Python falsy 值误判检查清单
+│   ├── sentinel-contract.md      # 哨兵契约 L1-L5 与 NaN/Inf 守卫清单
+│   ├── cross-project-synthesis.md # 跨项目共性经验与反模式库
+│   └── adr-template.md           # 架构决策记录（ADR）模板
 ├── skills/                         # AI 编码规范（扁平结构）
 │   ├── vba-SKILL.md              # VBA 编码规范
 │   ├── vba-manual-authoring.md   # 手册撰写规范
@@ -107,8 +113,9 @@ ExcelVBA函数库/
 ├── build/                          # 构建产出（.gitignore）
 ├── logs/                           # 日志（.gitignore）
 ├── AGENTS.md                       # 项目宪法（AI 入口）
+├── CLAUDE.md                       # Claude Code 兼容副本（AGENTS.md 副本，2026-08 治理对齐）
 ├── README.md                       # 用户入口·中文
-├── README_EN.md                    # 用户入口·英文
+├── README.en.md                    # 用户入口·英文
 ├── LICENSE                         # MIT 许可证
 ├── CONTRIBUTING.md                 # 贡献指南
 ├── SECURITY.md                     # 安全策略
@@ -203,8 +210,9 @@ Git hooks 和自动化脚本，由提交钩子直接调用。
 | 文件 | 角色 |
 |------|------|
 | `AGENTS.md` | 项目宪法（AI 入口），仅保留一级路由 |
+| `CLAUDE.md` | Claude Code 兼容副本（AGENTS.md 副本） |
 | `README.md` | 用户入口·中文 |
-| `README_EN.md` | 用户入口·英文 |
+| `README.en.md` | 用户入口·英文 |
 | `LICENSE` | MIT 许可证 |
 | `CONTRIBUTING.md` | 贡献指南 |
 | `SECURITY.md` | 安全策略 |
