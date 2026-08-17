@@ -2,7 +2,7 @@
 
 All notable changes to Excel VBA Libraries.
 
-## [Unreleased]
+## [2.1.1] — 2026-08-16
 
 ### Fixed
 
