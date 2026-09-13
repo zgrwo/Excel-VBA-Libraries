@@ -153,7 +153,8 @@ Public Function XmlGet(ByVal xml As Variant, ByVal xpath As String, _
         End If
         On Error GoTo 0
     End If
-    If Len(CStr(xml)) = 0 Then XmlGet = Empty: Exit Function
+    ' R5-49: 空输入不静默返回 Empty — 显式报错 (ERR_XML_EMPTY)
+    If Len(CStr(xml)) = 0 Then Err.Raise ERR_XML_EMPTY, "XmlGet", "XML 字符串为空。"
     Dim doc As Object
     ' 解析失败/COM 缺失必须上抛 (此前 Resume Next 吞错后静默返回 Empty)
     Set doc = GetDoc(CStr(xml), namespaces)
@@ -213,8 +214,9 @@ Public Function XmlToRange(ByVal xml As String, _
         Err.Raise ERR_XML_NOT_FOUND, "XmlToRange", "XPath 返回空节点集: " & rowXPath
     End If
 
-    ' 确定列名 (支持: 省略 / 标量 / 1D 数组 / 2D 数组常量 / Range)
-    If IsMissing(colNames) Then
+    ' 确定列名 (支持: 省略 / Empty / 标量 / 1D 数组 / 2D 数组常量 / Range)
+    ' R5-50: colNames=Empty (空白单元格) 与省略同义 — 走 auto-detect
+    If IsMissing(colNames) Or IsEmpty(colNames) Then
         nCols = DetectColumns(rows(0), cols)
     ElseIf IsObject(colNames) Then
         If TypeName(colNames) = "Range" Then

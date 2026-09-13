@@ -166,7 +166,11 @@ if __name__ == "__main__":
         WHITELIST = {"Len", "Range", "result", "Test_SqlUtils",
                      "SqlRangeQuery", "SqlQuery", "SqlListSheets", "SqlListColumns",
                      "SqlJoin", "SqlGroupBy", "SqlExecute", "SqlGetConnection",
-                     "SqlEscapeString", "SqlGetSheetColumns", "SqlGetNamedRanges"}
+                     "SqlEscapeString", "SqlGetSheetColumns", "SqlGetNamedRanges",
+                     # Test_SqlUtils 内调用的私有归一化助手 (R5-27), 由 VBA 单元覆盖
+                     "NormalizeTableName",
+                     # 注释文本 "容忍 WHERE(" 被 `Name(` 正则误捕 (R5-05 说明行)
+                     "WHERE"}
         all_uncovered = set()
         for m in mods:
             info = analyze(m)

@@ -16,6 +16,7 @@ Private VK As New VariantKit
 '
 ' 错误码:
 '   vbObjectError + 1101 — 无效输入 / 外部组件不可用
+'   vbObjectError + 1102 — 不支持的运算符
 '
 ' 字典操作:
 '   DictMerge         — 合并两个字典
@@ -57,6 +58,7 @@ Private VK As New VariantKit
 
 ' -- 错误代码常量 -----------------------------------------------------
 Private Const ERR_INVALID_INPUT As Long = vbObjectError + 1101
+Private Const ERR_INVALID_OP    As Long = vbObjectError + 1102
 
 
 ' -- DictKey — 生成安全的字典键，避免 Null/Error/Object/Empty/Array 碰撞到空字符串 --
@@ -628,6 +630,9 @@ Public Function DictFilterByValue( _
     Dim key As Variant
     InitDictPreserveMode result, dict
 
+    ' 未知运算符必须报错, 不能静默返回空字典 (R5-12, 与 ArrayUtils/RangeUtils 白名单一致)
+    operator = NormalizeFilterOp(operator, "DictFilterByValue")
+
     If dict Is Nothing Then
         Set DictFilterByValue = result
         Exit Function
@@ -639,6 +644,23 @@ Public Function DictFilterByValue( _
         End If
     Next key
     Set DictFilterByValue = result
+End Function
+
+
+' NormalizeFilterOp — 运算符白名单校验 + Trim/LCase 归一 (与 ArrayUtils/RangeUtils 一致)
+' 未知运算符必须报错, 不能静默返回空/False; 归一后的 op 供执行路径复用
+Private Function NormalizeFilterOp(ByVal operator As String, ByVal funcName As String) As String
+    Dim opNorm As String
+
+    opNorm = LCase$(Trim$(operator))
+    Select Case opNorm
+        Case "=", "<>", "<", "<=", ">", ">=", "contains", "notcontains", _
+             "startswith", "endswith", "isblank", "isnotblank", "regex"
+            ' 合法运算符
+        Case Else
+            Err.Raise ERR_INVALID_OP, funcName, "不支持的运算符: '" & CStr(operator) & "'。"
+    End Select
+    NormalizeFilterOp = opNorm
 End Function
 
 

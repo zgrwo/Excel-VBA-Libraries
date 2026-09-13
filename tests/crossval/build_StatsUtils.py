@@ -50,6 +50,91 @@ def _zscore_err_probe(excel, wb, ws, runner, tc, args):
     val = run_macro(excel, wb, "StatsR4Probe.Probe")
     return float(val), 1.0, 0.0
 
+
+# 内部错误码常量 (src/StatsUtils.bas:85-86)
+VB_OBJECT_ERROR = -2147221504
+ERR_INVALID_INPUT = float(VB_OBJECT_ERROR + 1001)
+ERR_DIV_BY_ZERO = float(VB_OBJECT_ERROR + 1002)
+
+VBA_R5_PROBE = r"""
+Option Explicit
+Public Function ProbeR5(ByVal which As String) As Double
+    On Error GoTo EH
+    Dim v As Variant
+    Dim d(1 To 3, 1 To 3) As Variant
+    If which = "mode_na" Then
+        v = UDF_STAT_MODE(Array(1#, 2#, 3#))
+        If CStr(v) = CStr(CVErr(xlErrNA)) Then ProbeR5 = 1 Else ProbeR5 = 0
+        Exit Function
+    ElseIf which = "normalize_div0" Then
+        v = UDF_STAT_NORMALIZE(Array(5#, 5#, 5#))
+        If CStr(v) = CStr(CVErr(xlErrDiv0)) Then ProbeR5 = 1 Else ProbeR5 = 0
+        Exit Function
+    ElseIf which = "correl_div0" Then
+        v = UDF_STAT_CORREL(Array(1#, 2#, 3#), Array(5#, 5#, 5#))
+        If CStr(v) = CStr(CVErr(xlErrDiv0)) Then ProbeR5 = 1 Else ProbeR5 = 0
+        Exit Function
+    ElseIf which = "geomean_num" Then
+        v = UDF_STAT_GEOMEAN(Array(1#, 0#, 2#))
+        If CStr(v) = CStr(CVErr(xlErrNum)) Then ProbeR5 = 1 Else ProbeR5 = 0
+        Exit Function
+    ElseIf which = "mean_errorcell_udf" Then
+        v = UDF_STAT_MEAN(Array(1#, CVErr(xlErrDiv0), 3#))
+        If CStr(v) = CStr(CVErr(xlErrValue)) Then ProbeR5 = 1 Else ProbeR5 = 0
+        Exit Function
+    ElseIf which = "mean_errorcell_core" Then
+        v = Mean(Array(1#, CVErr(xlErrDiv0), 3#))
+    ElseIf which = "rank_empty_core" Then
+        v = Rank(Array(10#, 20#, 30#), Empty)
+    ElseIf which = "rankeq_empty_core" Then
+        v = RankEq(Array(10#, 20#, 30#), Empty)
+    ElseIf which = "corrmatrix_zero_var" Then
+        d(1, 1) = 1#: d(1, 2) = 5#: d(1, 3) = 9#
+        d(2, 1) = 2#: d(2, 2) = 5#: d(2, 3) = 10#
+        d(3, 1) = 3#: d(3, 2) = 5#: d(3, 3) = 11#
+        v = CorrelationMatrix(d, False)
+    ElseIf which = "betareg_oob" Then
+        v = BetaReg(1.5, 2#, 3#)
+    ElseIf which = "betareg_neg" Then
+        v = BetaReg(-0.1, 2#, 3#)
+    ElseIf which = "betareg_half" Then
+        ProbeR5 = BetaReg(0.5, 2#, 3#)
+        Exit Function
+    Else
+        ProbeR5 = -999
+        Exit Function
+    End If
+    ProbeR5 = 0
+    Exit Function
+EH:
+    ProbeR5 = Err.Number
+End Function
+"""
+
+
+def _stats_r5_probe(excel, wb, ws, runner, tc, args):
+    """R5-20/R5-21/R5-22/R5-54/R5-55 探针:
+    - UDF 包装层 CVErr 映射: CStr 比对 (匹配返回 1)
+    - 核心路径负例: 返回 Err.Number
+    - betareg_half: 返回计算值 (scipy.special.betainc 独立参考)
+    """
+    from tests.test_utils import run_macro
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == "StatsR5Probe":
+            vbproj.VBComponents.Remove(comp)
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = "StatsR5Probe"
+    comp.CodeModule.AddFromString(
+        VBA_R5_PROBE.replace("\r\n", "\n").replace("\n", "\r\n"))
+    val = run_macro(excel, wb, "StatsR5Probe.ProbeR5", args[0])
+    if args[0] == "betareg_half":
+        from scipy import special as _sp_special
+        expected = float(_sp_special.betainc(2.0, 3.0, 0.5))
+    else:
+        expected = float(args[1])
+    return float(val), expected, float(args[2]) if len(args) > 2 else 0.0
+
 # =============================================================================
 # Test Cases
 # =============================================================================
@@ -457,6 +542,54 @@ if _HAS_SCIPY:
         {"name": "ZScore_invalid_value", "func": "ZScore",
          "args": lambda: (), "reconstruct": _zscore_err_probe, "py_ref": lambda a: 1.0},
     ]
+
+
+# 2026-09-13 R5-20/R5-21/R5-22/R5-54/R5-55 回归
+TEST_CASES += [
+    # R5-20: UDF 包装层映射到具体 CVErr (1 = CStr 匹配)
+    {"name": "UDF_MODE_CVErrNA", "func": "UDF_STAT_MODE",
+     "args": lambda: ("mode_na", 1.0),
+     "reconstruct": _stats_r5_probe, "py_ref": lambda a: 1.0},
+    {"name": "UDF_NORMALIZE_CVErrDiv0", "func": "UDF_STAT_NORMALIZE",
+     "args": lambda: ("normalize_div0", 1.0),
+     "reconstruct": _stats_r5_probe, "py_ref": lambda a: 1.0},
+    {"name": "UDF_CORREL_CVErrDiv0", "func": "UDF_STAT_CORREL",
+     "args": lambda: ("correl_div0", 1.0),
+     "reconstruct": _stats_r5_probe, "py_ref": lambda a: 1.0},
+    {"name": "UDF_GEOMEAN_CVErrNum", "func": "UDF_STAT_GEOMEAN",
+     "args": lambda: ("geomean_num", 1.0),
+     "reconstruct": _stats_r5_probe, "py_ref": lambda a: 1.0},
+    # R5-21: Error 单元格不得静默跳过 — UDF → #VALUE!; 核心 → ERR_INVALID_INPUT
+    {"name": "UDF_MEAN_ErrorCell_CVErrValue", "func": "UDF_STAT_MEAN",
+     "args": lambda: ("mean_errorcell_udf", 1.0),
+     "reconstruct": _stats_r5_probe, "py_ref": lambda a: 1.0},
+    {"name": "Mean_ErrorCell_ERR_INVALID_INPUT", "func": "Mean",
+     "args": lambda: ("mean_errorcell_core", ERR_INVALID_INPUT),
+     "reconstruct": _stats_r5_probe, "py_ref": lambda a: ERR_INVALID_INPUT},
+    # R5-22: Empty value 必须报错, 不得当 0 参与排名
+    {"name": "Rank_EmptyValue_ERR_INVALID_INPUT", "func": "Rank",
+     "args": lambda: ("rank_empty_core", ERR_INVALID_INPUT),
+     "reconstruct": _stats_r5_probe, "py_ref": lambda a: ERR_INVALID_INPUT},
+    {"name": "RankEq_EmptyValue_ERR_INVALID_INPUT", "func": "RankEq",
+     "args": lambda: ("rankeq_empty_core", ERR_INVALID_INPUT),
+     "reconstruct": _stats_r5_probe, "py_ref": lambda a: ERR_INVALID_INPUT},
+    # R5-54: 零方差列 → ERR_DIV_BY_ZERO, 不再静默给 0
+    {"name": "CorrelationMatrix_ZeroVariance_ERR_DIV_BY_ZERO", "func": "CorrelationMatrix",
+     "args": lambda: ("corrmatrix_zero_var", ERR_DIV_BY_ZERO),
+     "reconstruct": _stats_r5_probe, "py_ref": lambda a: ERR_DIV_BY_ZERO},
+    # R5-55: x 越界 → ERR_INVALID_INPUT, 不再返回 -1 哨兵
+    {"name": "BetaReg_XOutOfRange_ERR_INVALID_INPUT", "func": "BetaReg",
+     "args": lambda: ("betareg_oob", ERR_INVALID_INPUT),
+     "reconstruct": _stats_r5_probe, "py_ref": lambda a: ERR_INVALID_INPUT},
+    {"name": "BetaReg_XNegative_ERR_INVALID_INPUT", "func": "BetaReg",
+     "args": lambda: ("betareg_neg", ERR_INVALID_INPUT),
+     "reconstruct": _stats_r5_probe, "py_ref": lambda a: ERR_INVALID_INPUT},
+    # R5-55 边界正向: x=0.5 仍正常 (scipy.special.betainc 独立参考)
+    {"name": "BetaReg_XHalf_Value", "func": "BetaReg",
+     "args": lambda: ("betareg_half", 0.0, 1e-12),
+     "reconstruct": _stats_r5_probe, "py_ref": lambda a: 0.6875,
+     "skip_if": not _HAS_SCIPY, "skip_reason": "scipy not installed"},
+]
 
 
 def main() -> int:

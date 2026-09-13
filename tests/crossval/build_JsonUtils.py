@@ -350,7 +350,7 @@ TEST_CASES = [
 
 # 2026-09-13 回归: 空数组路径/控制字符/溢出/Range 双路径
 def _json_err_probe(excel, wb, ws, runner, tc, args):
-    """VBA 探针: 在 VBA 内部捕获错误码并返回 (COM 不传递 VBA 错误描述)."""
+    """VBA 探针: 在 VBA 内部捕获错误码并返回值 (COM 不传递 VBA 错误描述)."""
     vbproj = wb.VBProject
     for comp in list(vbproj.VBComponents):
         if comp.Name == "JsonProbe":
@@ -361,10 +361,47 @@ def _json_err_probe(excel, wb, ws, runner, tc, args):
         "Public Function ProbeErr(ByVal which As String) As Double\r\n"
         "    On Error GoTo EH\r\n"
         "    Dim v As Variant\r\n"
+        "    Dim s As String\r\n"
         "    If which = \"overflow\" Then\r\n"
         "        v = JsonParse(\"9e308\")\r\n"
+        "    ElseIf which = \"bigint\" Then\r\n"
+        "        v = JsonParse(String$(400, \"9\"))\r\n"
+        "    ElseIf which = \"bigfrac\" Then\r\n"
+        "        v = JsonParse(String$(400, \"9\") & \".5\")\r\n"
+        "    ElseIf which = \"depth128\" Then\r\n"
+        "        v = JsonParse(String$(128, \"[\") & \"1\" & String$(128, \"]\"))\r\n"
+        "        ProbeErr = 1\r\n"
+        "        Exit Function\r\n"
+        "    ElseIf which = \"depth_over\" Then\r\n"
+        "        v = JsonParse(String$(200, \"[\") & \"1\" & String$(200, \"]\"))\r\n"
         "    ElseIf which = \"stringify_empty\" Then\r\n"
-        "        ProbeErr = IIf(JsonStringify(JsonParse(\"[]\")) = \"[]\", 1, 0)\r\n"
+        "        If JsonStringify(JsonParse(\"[]\")) = \"[]\" Then ProbeErr = 1 Else ProbeErr = 0\r\n"
+        "        Exit Function\r\n"
+        "    ElseIf which = \"stringify_unalloc\" Then\r\n"
+        "        Dim arrU() As Variant\r\n"
+        "        If JsonStringify(arrU) = \"[]\" Then ProbeErr = 1 Else ProbeErr = 0\r\n"
+        "        Exit Function\r\n"
+        "    ElseIf which = \"fraction_tiny\" Then\r\n"
+        "        s = JsonStringify(0.000000000000001)\r\n"
+        "        If Not JsonIsValid(s) Then\r\n"
+        "            ProbeErr = -1\r\n"
+        "            Exit Function\r\n"
+        "        End If\r\n"
+        "        ProbeErr = CDbl(JsonParse(s))\r\n"
+        "        Exit Function\r\n"
+        "    ElseIf which = \"fraction_1e7\" Then\r\n"
+        "        s = JsonStringify(0.0000001)\r\n"
+        "        If Not JsonIsValid(s) Then\r\n"
+        "            ProbeErr = -1\r\n"
+        "            Exit Function\r\n"
+        "        End If\r\n"
+        "        ProbeErr = CDbl(JsonParse(s))\r\n"
+        "        Exit Function\r\n"
+        "    ElseIf which = \"get_array_root\" Then\r\n"
+        "        ProbeErr = JsonGet(JsonParse(\"[10,20,30]\"), \"[0]\")\r\n"
+        "        Exit Function\r\n"
+        "    ElseIf which = \"get_array_root_str\" Then\r\n"
+        "        If JsonGet(JsonParse(\"[\"\"a\"\",\"\"b\"\"]\"), \"[1]\") = \"b\" Then ProbeErr = 1 Else ProbeErr = 0\r\n"
         "        Exit Function\r\n"
         "    Else\r\n"
         "        v = JsonGet(\"[]\", \"[0]\")\r\n"
@@ -375,7 +412,8 @@ def _json_err_probe(excel, wb, ws, runner, tc, args):
         "End Function")
     from tests.test_utils import run_macro
     err_num = run_macro(excel, wb, "JsonProbe.ProbeErr", args[0])
-    return float(err_num), float(args[1]), 0.0
+    tol = float(args[2]) if len(args) > 2 else 0.0
+    return float(err_num), float(args[1]), tol
 
 
 TEST_CASES += [
@@ -403,6 +441,47 @@ TEST_CASES += [
     {"name": "JsonParse_escaped_ufffd", "func": "JsonParse",
      "args": lambda: (r'"x\u0041' + "\uFFFD" + '"',),
      "py_ref": lambda a: "xA\uFFFD", "result_type": "string"},
+
+    # ---- R5-03: |x|<1 补前导 0 (json.dumps 独立参考) + JsonIsValid 往返 ----
+    {"name": "JsonStringify_fraction_half", "func": "JsonStringify",
+     "args": lambda: (0.5,),
+     "py_ref": lambda a: _json.dumps(a[0], separators=(',', ':')),
+     "result_type": "string"},
+    {"name": "JsonStringify_fraction_neg_quarter", "func": "JsonStringify",
+     "args": lambda: (-0.25,),
+     "py_ref": lambda a: _json.dumps(a[0], separators=(',', ':')),
+     "result_type": "string"},
+    {"name": "JsonStringify_fraction_tiny_roundtrip", "func": "JsonParse",
+     "args": lambda: ("fraction_tiny", 1e-15, 1e-30),
+     "reconstruct": _json_err_probe, "py_ref": lambda a: 1e-15},
+    {"name": "JsonStringify_fraction_1e7_roundtrip", "func": "JsonParse",
+     "args": lambda: ("fraction_1e7", 1e-7, 1e-22),
+     "reconstruct": _json_err_probe, "py_ref": lambda a: 1e-7},
+    # ---- R5-17: 超长数字字面量 → ERR_INVALID_JSON (而非裸 Error 6) ----
+    {"name": "JsonParse_bigint_overflow", "func": "JsonParse",
+     "args": lambda: ("bigint", -2147220203.0),
+     "reconstruct": _json_err_probe, "py_ref": lambda a: -2147220203.0},
+    {"name": "JsonParse_bigfrac_overflow", "func": "JsonParse",
+     "args": lambda: ("bigfrac", -2147220203.0),
+     "reconstruct": _json_err_probe, "py_ref": lambda a: -2147220203.0},
+    # ---- R5-18: 深度上限 128 (128 层 OK / 200 层 ERR_INVALID_JSON) ----
+    {"name": "JsonParse_depth128_ok", "func": "JsonParse",
+     "args": lambda: ("depth128", 1.0),
+     "reconstruct": _json_err_probe, "py_ref": lambda a: 1.0},
+    {"name": "JsonParse_depth_over_limit", "func": "JsonParse",
+     "args": lambda: ("depth_over", -2147220203.0),
+     "reconstruct": _json_err_probe, "py_ref": lambda a: -2147220203.0},
+    # ---- R5-34: 未分配数组 Stringify 必须返回 "[]" (而非 Error 9) ----
+    {"name": "JsonStringify_unallocated_array", "func": "JsonParse",
+     "args": lambda: ("stringify_unalloc", 1.0),
+     "reconstruct": _json_err_probe, "py_ref": lambda a: 1.0},
+    # ---- R5-48: 已解析数组根支持 "[0]" 数字/字符串索引 ----
+    {"name": "JsonGet_parsed_array_root", "func": "JsonParse",
+     "args": lambda: ("get_array_root", 10.0),
+     "reconstruct": _json_err_probe, "py_ref": lambda a: 10.0},
+    {"name": "JsonGet_parsed_array_root_string", "func": "JsonParse",
+     "args": lambda: ("get_array_root_str", 1.0),
+     "reconstruct": _json_err_probe, "py_ref": lambda a: 1.0},
 ]
 
 

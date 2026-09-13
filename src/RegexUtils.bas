@@ -61,16 +61,39 @@ Private Const ERR_REGEX_TOO_LONG As Long = vbObjectError + 1004
 Private Const MAX_PATTERN_LENGTH As Long = 256
 
 '=============================================================================
-' 辅助函数: 创建并配置正则对象
+' 辅助函数: 创建并配置正则对象 (Static 最近模式缓存)
+'
+' 缓存键 = Pattern|IgnoreCase|MultiLine。命中时直接复用, 避免每次调用
+' CreateObject (数组/Range 路径逐元素调用时收益显著); 未命中时新建对象,
+' 全部配置与自检通过后才替换缓存 — 非法模式不会污染缓存。
+' Global 不入缓存键: 调用方 (RegexIsFullMatch/RegexReplace) 会临时修改它,
+' 命中时统一重置为 True。
 '=============================================================================
 Private Function GetRegex( _
     ByVal Pattern As String, _
     Optional ByVal IgnoreCase As Boolean = True, _
     Optional ByVal MultiLine As Boolean = True) As Object  ' 与公共 API 默认值一致
 
+    Static cachedReg As Object
+    Static cachedKey As String
+    Dim cacheKey As String
+    Dim objReg   As Object
+
+    cacheKey = Pattern & "|" & CStr(IgnoreCase) & "|" & CStr(MultiLine)
+
+    ' 命中: 复用缓存对象, 恢复 .Global 基准状态
+    If Not (cachedReg Is Nothing) Then
+        If cachedKey = cacheKey Then
+            cachedReg.Global = True
+            Set GetRegex = cachedReg
+            Exit Function
+        End If
+    End If
+
+    ' 未命中: 新建正则对象
     On Error Resume Next
-    Set GetRegex = CreateObject(REGEX_PROGID)
-    If Err.Number <> 0 Or GetRegex Is Nothing Then
+    Set objReg = CreateObject(REGEX_PROGID)
+    If Err.Number <> 0 Or objReg Is Nothing Then
         Err.Clear
         On Error GoTo 0
         Err.Raise ERR_NOT_AVAIL, ERR_SOURCE, _
@@ -85,7 +108,7 @@ Private Function GetRegex( _
     End If
 
     ' 设置属性 (均在 Resume Next 下，避免非法 Pattern 直接崩溃)
-    With GetRegex
+    With objReg
         .Pattern = Pattern
         If Err.Number <> 0 Then
             Err.Clear
@@ -100,12 +123,17 @@ Private Function GetRegex( _
 
     ' 额外安全测试 (主要检测逻辑错误)
     On Error Resume Next
-    GetRegex.Test ""
+    objReg.Test ""
     If Err.Number <> 0 Then
         Err.Clear: On Error GoTo 0
         Err.Raise ERR_INVALID_REGEX, ERR_SOURCE, "无效的正则表达式: " & Pattern
     End If
     On Error GoTo 0
+
+    ' 全部校验通过后才替换缓存
+    Set cachedReg = objReg
+    cachedKey = cacheKey
+    Set GetRegex = objReg
 End Function
 
 '=============================================================================
@@ -426,7 +454,8 @@ Private Function RegexEnsure2D(ByRef v As Variant) As Variant
 End Function
 
 '=============================================================================
-' 私有: 使用共享 RegExp 对象执行分割 (避免重复 CreateObject)
+' 私有: 使用调用方传入的 RegExp 对象执行分割
+' (对象来自 GetRegex 的模块级 Static 缓存, 单次调用内复用同一对象)
 '=============================================================================
 Private Function RegexSplitWith( _
     ByVal InputText As String, _

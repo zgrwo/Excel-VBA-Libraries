@@ -484,9 +484,12 @@ Never rely on these; behaviour is host-dependent and unreliable across Excel ver
 | Goal | Safe method | Forbidden |
 |------|------------|-----------|
 | Return empty Variant() | `result = Array()` | `ReDim(0 To -1)`, `ReDim(1 To 0)` |
-| Return empty Double()/etc. | `ReDim result(0 To 0): Erase result` | `result = Array()`, `ReDim(1 To 0)` |
+| Return empty Double()/etc. (unallocated) | `Erase result` (`ReDim result(0 To 0): Erase result` is equivalent) | `result = Array()`, `ReDim(1 To 0)`, `ReDim(0 To -1)` |
 | Empty after filtering | Guard size before ReDim | Unguarded `ReDim(0 To n-1)` |
 | Test if empty | IsEmptyArray() probe (see §4.3) | Bare `UBound()` on possibly-uninit array |
+
+> VBA 无法本地创建**零长度类型数组**（`ReDim(0 To -1)` 抛 Error 9；`ReDim(0 To 0)` 是 1 个元素）。
+> `Erase` 后数组为**未分配**状态，`LBound`/`UBound` 会抛 Error 9 — 必须用 §4.3 探针判定空。
 
 ```vba
 ' Safe guard for computed bounds

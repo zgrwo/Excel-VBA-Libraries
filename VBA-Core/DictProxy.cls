@@ -90,6 +90,12 @@ Public Function Merge(ByRef dict1 As Object, _
     ElseIf Not dict2 Is Nothing Then
         cm = dict2.CompareMode
     End If
+    ' 跨 CompareMode 合并: 用更严格的 vbBinaryCompare, 避免 text{binary} 时静默折叠键
+    If Not dict1 Is Nothing Then
+        If Not dict2 Is Nothing Then
+            If dict1.CompareMode <> dict2.CompareMode Then cm = vbBinaryCompare
+        End If
+    End If
     Set result = Create(cm)
     If Not dict1 Is Nothing Then
         For Each key In dict1.Keys
@@ -122,7 +128,7 @@ Public Sub Test_DictProxy()
     On Error GoTo ErrHandler
     Dim failCount As Long: failCount = 0
     Dim dp As DictProxy: Set dp = New DictProxy
-    Dim dict As Object, dict1 As Object, dict2 As Object
+    Dim dict As Object, dict1 As Object, dict2 As Object, dictBin As Object
     Dim result As Variant, i As Long
 
     '=====================================================================
@@ -184,14 +190,14 @@ Public Sub Test_DictProxy()
     result = dp.ToArray(dict)
     On Error Resume Next
     i = UBound(result, 1)
-    If Err.Number = 0 Then Err.Raise 5  ' should error if truly empty
+    If Err.Number = 0 Then On Error GoTo 0: Err.Raise 5  ' should error if truly empty
     Err.Clear: On Error GoTo 0
 
     ' Nothing → empty array
     result = dp.ToArray(Nothing)
     On Error Resume Next
     i = UBound(result, 1)
-    If Err.Number = 0 Then Err.Raise 5
+    If Err.Number = 0 Then On Error GoTo 0: Err.Raise 5
     Err.Clear: On Error GoTo 0
 
     ' Single item
@@ -257,6 +263,26 @@ Public Sub Test_DictProxy()
     Set dict = dp.Merge(dict1, dict2, True)
     If Not (dict("obj") = "replacement") Then Err.Raise 5
     If Not (dict("num") = 100) Then Err.Raise 5
+
+    ' Merge cross CompareMode → vbBinaryCompare (2026-09-13 R5-10:
+    ' 此前结果取 dict1 模式, text{"a"} + binary{"A"} 静默折叠为 1 个键)
+    Set dict1 = dp.Create()                  ' vbTextCompare
+    dict1.Add "a", 1
+    Set dictBin = dp.Create(vbBinaryCompare)
+    dictBin.Add "A", 2
+
+    Set dict = dp.Merge(dict1, dictBin, False)
+    If Not (dict.Count = 2) Then Err.Raise 5
+    If Not (dict.CompareMode = vbBinaryCompare) Then Err.Raise 5
+
+    ' 参数顺序颠倒 → 同样使用 vbBinaryCompare
+    Set dict = dp.Merge(dictBin, dict1, False)
+    If Not (dict.Count = 2) Then Err.Raise 5
+    If Not (dict.CompareMode = vbBinaryCompare) Then Err.Raise 5
+
+    ' 同模式合并不受影响 (仍为 vbTextCompare)
+    Set dict = dp.Merge(dict1, dp.Create(), False)
+    If Not (dict.CompareMode = vbTextCompare) Then Err.Raise 5
 
     Set inner = Nothing: Set dict = Nothing
     Set dict1 = Nothing: Set dict2 = Nothing

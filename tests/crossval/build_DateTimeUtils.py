@@ -75,6 +75,101 @@ def _daysinmonth_err_probe(excel, wb, ws, runner, tc, args):
     return float(val), 1.0, 0.0
 
 
+# src/DateTimeUtils.bas:14 — ERR_INVALID_INPUT = vbObjectError + 1001
+DT_ERR_INVALID_INPUT = float(-2147221504 + 1001)
+
+# R5-02/R5-10/R5-24/R5-44/R5-56 探针: CVErr/Empty/Null/日期字面量必须在 VBA 内部构造
+DT_R5_PROBE_VBA = r"""
+Option Explicit
+
+Public Function ProbeR5(ByVal which As String) As Double
+    On Error GoTo EH
+
+    Dim v As Variant
+
+    ' ---- R5-02: 非法输入必须显式报 ERR_INVALID_INPUT (不再静默兜底) ----
+    If which = "quarter_err" Then
+        v = Quarter(CVErr(xlErrDiv0))
+    ElseIf which = "firstdom_garbage" Then
+        v = FirstDayOfMonth("garbage")
+    ElseIf which = "firstdom_null" Then
+        v = FirstDayOfMonth(Null)
+    ElseIf which = "datetounix_garbage" Then
+        v = DateToUnix("garbage")
+    ElseIf which = "daysinyear_abc" Then
+        v = DaysInYear("abc")
+    ElseIf which = "isleap_err" Then
+        v = IsLeapYear(CVErr(xlErrValue))
+
+    ' ---- R5-02: UDF 包装层非法输入 → CVErr(xlErrValue) ----
+    ElseIf which = "udf_quarter_err" Then
+        v = UDF_DT_QUARTER(CVErr(xlErrDiv0))
+        If CStr(v) = CStr(CVErr(xlErrValue)) Then ProbeR5 = 1 Else ProbeR5 = 0
+        Exit Function
+    ElseIf which = "udf_firstdom_garbage" Then
+        v = UDF_DT_FIRSTDAYOFMONTH("garbage")
+        If CStr(v) = CStr(CVErr(xlErrValue)) Then ProbeR5 = 1 Else ProbeR5 = 0
+        Exit Function
+
+    ' ---- R5-02: Empty/省略 = 今天 ----
+    ElseIf which = "firstdom_empty" Then
+        ProbeR5 = CDbl(FirstDayOfMonth(Empty))
+        Exit Function
+    ElseIf which = "quarter_empty" Then
+        ProbeR5 = Quarter(Empty)
+        Exit Function
+
+    ' ---- R5-24: vbDate 字面量按日期取年份 ----
+    ElseIf which = "daysinyear_vbdate" Then
+        ProbeR5 = DaysInYear(#2/15/2024#)
+        Exit Function
+
+    ' ---- R5-44: 标量节假日 (#date / Empty) ----
+    ElseIf which = "isholiday_vbdate" Then
+        If IsHoliday(#12/25/2024#, #12/25/2024#) Then ProbeR5 = 1 Else ProbeR5 = 0
+        Exit Function
+    ElseIf which = "isholiday_empty" Then
+        If IsHoliday(#12/25/2024#, Empty) Then ProbeR5 = 1 Else ProbeR5 = 0
+        Exit Function
+
+    ' ---- R5-56: 9999-12 月末不再 Error 5 ----
+    ElseIf which = "daysinmonth_9999" Then
+        ProbeR5 = DaysInMonth(9999, 12)
+        Exit Function
+    ElseIf which = "udf_daysinmonth_9999" Then
+        ProbeR5 = UDF_DT_DAYSINMONTH(9999, 12)
+        Exit Function
+
+    Else
+        ProbeR5 = -999
+        Exit Function
+    End If
+
+    ProbeR5 = 0
+    Exit Function
+EH:
+    ProbeR5 = Err.Number
+End Function
+"""
+
+
+def _dt_r5_probe(excel, wb, ws, runner, tc, args):
+    """R5-02/R5-10/R5-24/R5-44/R5-56 探针: 返回 Err.Number / 计算结果。"""
+    from tests.test_utils import run_macro
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == "DtR5Probe":
+            vbproj.VBComponents.Remove(comp)
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = "DtR5Probe"
+    comp.CodeModule.AddFromString(
+        DT_R5_PROBE_VBA.replace("\r\n", "\n").replace("\n", "\r\n"))
+    val = run_macro(excel, wb, "DtR5Probe.ProbeR5", args[0])
+    expected = float(args[1])
+    tol = float(args[2]) if len(args) > 2 else 0.0
+    return float(val), expected, tol
+
+
 # =============================================================================
 # Test Cases
 # =============================================================================
@@ -477,6 +572,98 @@ TEST_CASES = [
                       [float((date(2024, 12, 25) - date(1899, 12, 30)).days)]),
      "py_ref": lambda a: True, "result_type": "bool"},
 
+]
+
+
+# =====================================================================
+# 第五轮审查回归 (2026-09-13): R5-02/R5-10/R5-23/R5-24/R5-44/R5-56
+# =====================================================================
+TEST_CASES += [
+    # ---- R5-23: 数值日期序列号 (45000 = 2023-03-15) 统一按日期解释 ----
+    {"name": "R5_23_ISOWeekNum_serial", "func": "ISOWeekNum",
+     "args": lambda: (45000,),
+     "py_ref": lambda a: datetime(2023, 3, 15).isocalendar()[1],
+     "result_type": "scalar"},
+    {"name": "R5_23_DayOfYear_serial", "func": "DayOfYear",
+     "args": lambda: (45000,),
+     "py_ref": lambda a: (date(2023, 3, 15) - date(2023, 1, 1)).days + 1,
+     "result_type": "scalar"},
+    {"name": "R5_23_DateToUnix_serial", "func": "DateToUnix",
+     "args": lambda: (45000,),
+     "py_ref": lambda a: int((datetime(2023, 3, 15) - datetime(1970, 1, 1)).total_seconds()),
+     "result_type": "scalar", "tol": 1.0},
+    {"name": "R5_23_IsWeekend_serial", "func": "IsWeekend",
+     "args": lambda: (45003,),
+     "py_ref": lambda a: datetime(2023, 3, 18).weekday() >= 5,
+     "result_type": "bool"},
+    {"name": "R5_23_FirstDayOfMonth_serial", "func": "FirstDayOfMonth",
+     "args": lambda: (45000,),
+     "py_ref": lambda a: datetime(2023, 3, 1), "result_type": "scalar"},
+    {"name": "R5_23_FiscalYear_serial", "func": "FiscalYear",
+     "args": lambda: (45000,),
+     "py_ref": lambda a: 2023, "result_type": "scalar"},
+    {"name": "R5_23_Quarter_serial", "func": "Quarter",
+     "args": lambda: (45000,),
+     "py_ref": lambda a: (datetime(2023, 3, 15).month - 1) // 3 + 1,
+     "result_type": "scalar"},
+
+    # ---- R5-02: 非法输入显式报 ERR_INVALID_INPUT (VBA 探针) ----
+    {"name": "R5_02_Quarter_error", "func": "Quarter",
+     "args": lambda: ("quarter_err", DT_ERR_INVALID_INPUT), "reconstruct": _dt_r5_probe},
+    {"name": "R5_02_FirstDayOfMonth_garbage", "func": "FirstDayOfMonth",
+     "args": lambda: ("firstdom_garbage", DT_ERR_INVALID_INPUT), "reconstruct": _dt_r5_probe},
+    {"name": "R5_02_FirstDayOfMonth_null", "func": "FirstDayOfMonth",
+     "args": lambda: ("firstdom_null", DT_ERR_INVALID_INPUT), "reconstruct": _dt_r5_probe},
+    {"name": "R5_02_DateToUnix_garbage", "func": "DateToUnix",
+     "args": lambda: ("datetounix_garbage", DT_ERR_INVALID_INPUT), "reconstruct": _dt_r5_probe},
+    {"name": "R5_02_DaysInYear_abc", "func": "DaysInYear",
+     "args": lambda: ("daysinyear_abc", DT_ERR_INVALID_INPUT), "reconstruct": _dt_r5_probe},
+
+    # ---- R5-02: UDF 包装层非法输入 → CVErr (返回 1 = CVErr(xlErrValue)) ----
+    {"name": "R5_02_UDF_Quarter_error", "func": "UDF_DT_QUARTER",
+     "args": lambda: ("udf_quarter_err", 1.0), "reconstruct": _dt_r5_probe},
+    {"name": "R5_02_UDF_FirstDayOfMonth_garbage", "func": "UDF_DT_FIRSTDAYOFMONTH",
+     "args": lambda: ("udf_firstdom_garbage", 1.0), "reconstruct": _dt_r5_probe},
+
+    # ---- R5-02: Empty = 今天 (Python 计算当前月首日/季度) ----
+    {"name": "R5_02_FirstDayOfMonth_empty_today", "func": "FirstDayOfMonth",
+     "args": lambda: ("firstdom_empty",
+                      float((date.today().replace(day=1) - date(1899, 12, 30)).days)),
+     "reconstruct": _dt_r5_probe},
+    {"name": "R5_02_Quarter_empty_today", "func": "Quarter",
+     "args": lambda: ("quarter_empty", float((date.today().month - 1) // 3 + 1)),
+     "reconstruct": _dt_r5_probe},
+
+    # ---- R5-10: IsLeapYear 对错误值报错; 日期字符串取所在年份 ----
+    {"name": "R5_10_IsLeapYear_error", "func": "IsLeapYear",
+     "args": lambda: ("isleap_err", DT_ERR_INVALID_INPUT), "reconstruct": _dt_r5_probe},
+    {"name": "R5_10_IsLeapYear_date_string", "func": "IsLeapYear",
+     "args": lambda: ("2024-01-01",), "py_ref": lambda a: True, "result_type": "bool"},
+
+    # ---- R5-24: DaysInYear 接受日期与 vbDate ----
+    {"name": "R5_24_DaysInYear_date_string", "func": "DaysInYear",
+     "args": lambda: ("2024-02-15",), "py_ref": lambda a: 366, "result_type": "scalar"},
+    {"name": "R5_24_DaysInYear_vbdate", "func": "DaysInYear",
+     "args": lambda: ("daysinyear_vbdate", 366.0), "reconstruct": _dt_r5_probe},
+
+    # ---- R5-44: 标量节假日接受 vbDate / 日期字符串 / 序列号; Empty → False ----
+    {"name": "R5_44_IsHoliday_vbdate", "func": "IsHoliday",
+     "args": lambda: ("isholiday_vbdate", 1.0), "reconstruct": _dt_r5_probe},
+    {"name": "R5_44_IsHoliday_empty_holidays", "func": "IsHoliday",
+     "args": lambda: ("isholiday_empty", 0.0), "reconstruct": _dt_r5_probe},
+    {"name": "R5_44_IsHoliday_scalar_string", "func": "IsHoliday",
+     "args": lambda: (datetime(2024, 12, 25), "2024-12-25"),
+     "py_ref": lambda a: True, "result_type": "bool"},
+    {"name": "R5_44_IsHoliday_scalar_serial", "func": "IsHoliday",
+     "args": lambda: (datetime(2024, 12, 25),
+                      float((date(2024, 12, 25) - date(1899, 12, 30)).days)),
+     "py_ref": lambda a: True, "result_type": "bool"},
+
+    # ---- R5-56: 9999-12 不再 Error 5 ----
+    {"name": "R5_56_DaysInMonth_9999_12", "func": "DaysInMonth",
+     "args": lambda: ("daysinmonth_9999", 31.0), "reconstruct": _dt_r5_probe},
+    {"name": "R5_56_UDF_DaysInMonth_9999_12", "func": "UDF_DT_DAYSINMONTH",
+     "args": lambda: ("udf_daysinmonth_9999", 31.0), "reconstruct": _dt_r5_probe},
 ]
 
 

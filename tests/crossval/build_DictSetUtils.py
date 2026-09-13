@@ -61,6 +61,60 @@ def _py_set_sym_diff(a, b):
 
 
 # =============================================================================
+# R5 regression probes (tests-only; source modules untouched)
+#
+# R5-12 (2026-09-13): DictFilterByValue with an unknown operator must raise
+#   ERR_INVALID_OP (vbObjectError + 1102, per the module error-code docs),
+#   not silently return an empty dictionary / False.
+# =============================================================================
+
+VB_OBJECT_ERROR = -2147221504                # VBA vbObjectError
+ERR_INVALID_OP = VB_OBJECT_ERROR + 1102      # DictSetUtils.bas header contract
+
+_DICTSET_R5_PROBE = r"""
+Option Explicit
+
+Public Function Probe(ByVal which As String) As Double
+    Dim d As Object, e As Object
+    On Error GoTo EH
+
+    Set d = CreateObject("Scripting.Dictionary")
+    d.Add "a", 1
+    d.Add "b", 2
+
+    Select Case which
+        Case "filter_unknown_op"
+            Set e = DictFilterByValue(d, 1, "~~")
+            Probe = 0
+        Case "filter_known_op"
+            Set e = DictFilterByValue(d, 1, "=")
+            Probe = CDbl(e.Count)
+        Case Else
+            Probe = -1
+    End Select
+    Exit Function
+EH:
+    Probe = CDbl(Err.Number)
+End Function
+"""
+
+
+def _dictset_r5_probe(excel, wb, ws, runner, tc, args):
+    """R5-12: inject a VBA-internal probe (errors never cross COM)."""
+    from tests.test_utils import run_macro
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == "DictSetR5Probe":
+            vbproj.VBComponents.Remove(comp)
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = "DictSetR5Probe"
+    comp.CodeModule.AddFromString(_DICTSET_R5_PROBE)
+    val = run_macro(excel, wb, "DictSetR5Probe.Probe", args[0])
+    expected = tc["py_ref"](args) if callable(tc.get("py_ref")) else tc.get("py_ref")
+    return float(val), float(expected), 0.0
+
+
+# =============================================================================
 # Test Cases
 # =============================================================================
 
@@ -306,6 +360,16 @@ TEST_CASES = [
     {"name": "SetIsSubset_scalar_absent", "func": "SetIsSubset",
      "args": lambda: (9, [1, 2, 3]),
      "py_ref": lambda a: False, "result_type": "bool"},
+]
+
+# 2026-09-13 R5-12 回归: DictFilterByValue 未知运算符必须报错
+TEST_CASES += [
+    {"name": "R5-12_dictfilter_unknown_op", "func": "DictFilterByValue",
+     "args": lambda: ("filter_unknown_op",), "reconstruct": _dictset_r5_probe,
+     "py_ref": lambda a: float(ERR_INVALID_OP)},
+    {"name": "R5-12_dictfilter_known_op", "func": "DictFilterByValue",
+     "args": lambda: ("filter_known_op",), "reconstruct": _dictset_r5_probe,
+     "py_ref": lambda a: 1.0},
 ]
 
 

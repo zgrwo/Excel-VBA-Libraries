@@ -31,6 +31,21 @@ def _filter_unknown_op_probe(excel, wb, ws, runner, tc, args):
         return 1.0, 1.0, 0.0
 
 
+def _filter_ws_op_probe(excel, wb, ws, runner, tc, args):
+    """R5-06 回归: op 前后空白归一化后必须等同无空白 (此前静默返回仅标题)。"""
+    from tests.test_utils import run_macro, write_range
+    data = [["K", "V"], ["a", 1], ["b", 2]]
+    ws.UsedRange.ClearContents()
+    write_range(ws, data, 1, 1)
+    rng = ws.Range(ws.Cells(1, 1), ws.Cells(3, 2))
+    res = run_macro(excel, wb, "RangeUtils.FilterRangeToArray", rng, 1, args[0], "a", True)
+    try:
+        ok = (len(res) == 2 and str(res[1][0]) == "a" and float(res[1][1]) == 1.0)
+    except Exception:
+        ok = False
+    return float(1 if ok else 0), 1.0, 0.0
+
+
 # =============================================================================
 # Test Cases
 # =============================================================================
@@ -198,6 +213,14 @@ TEST_CASES = [
     # 2026-09-13 R4-18 回归: 未知运算符必须报错, 不得静默返回标题行
     {"name": "FilterRange_unknown_op_raises", "func": "FilterRange_unknown_op_raises",
      "args": lambda: (), "reconstruct": _filter_unknown_op_probe,
+     "py_ref": lambda a: 1.0},
+
+    # 2026-09-13 R5-06 回归: "= "/" =" 归一化后等同 "="
+    {"name": "FilterRange_op_trailing_space", "func": "FilterRangeToArray",
+     "args": lambda: ("= ",), "reconstruct": _filter_ws_op_probe,
+     "py_ref": lambda a: 1.0},
+    {"name": "FilterRange_op_leading_space", "func": "FilterRangeToArray",
+     "args": lambda: (" =",), "reconstruct": _filter_ws_op_probe,
      "py_ref": lambda a: 1.0},
 ]
 

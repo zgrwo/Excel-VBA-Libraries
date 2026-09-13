@@ -26,6 +26,10 @@ Option Explicit
 ' 局限:
 '   - v1 仅 auto/linear/poly; rate/rate_poly 与 SharedOutput 池化留待 v2
 '   - 规模上限见模块常量 (历史 2000 行 / 请求 100 / 特征 30 / 可调 10 / 输出 10)
+'   - 单次反解调用有总评估预算 SV_EVAL_BUDGET = 5,000,000 次模型预测评估
+'     (含目标函数输出评估与可达性采样), 超限 Err.Raise ERR_SV_LIMIT (1607)。
+'     最坏组合量级: 100 请求 × 20 起点 × 2000 评/起点 × 10 输出 ≈ 4e7 次预测
+'     (每预测至多 ~100 poly 项), 预算用于阻断该级联组合。
 '=====================================================================
 
 ' ---- 错误码 (vbObjectError + 1601..1699) ----
@@ -54,6 +58,8 @@ Private Const MIN_STARTS As Long = 1
 Private Const MAX_STARTS_LIMIT As Long = 20
 Private Const MAX_EVALS_PER_START As Long = 2000
 Private Const REACH_SAMPLES As Long = 1000
+' 单次调用总模型预测评估预算 (目标函数 + 可达性采样); 超限 → ERR_SV_LIMIT
+Private Const SV_EVAL_BUDGET As Long = 5000000
 Private Const POLY_RIDGE_LAMBDA As Double = 0.00001
 Private Const TARGET_PRIORITY As Double = 1000000#
 Private Const PROXIMITY_WEIGHT As Double = 0.02
@@ -73,6 +79,8 @@ Private Const STATUS_UNREACHABLE As String = "不可达"
 
 Private VK As VariantKit
 Private AO As New ArrayOps
+' 当前调用的累计模型评估数 (SvSolveInverseCore 入口重置)
+Private SvEvalCount As Long
 
 '=============================================================================
 ' 类型
@@ -128,6 +136,16 @@ Private Function SvIsFinite(ByVal d As Double) As Boolean
     SvIsFinite = True
 End Function
 
+' 累计一次模型预测评估; 超过单次调用预算 → ERR_SV_LIMIT
+Private Sub SvBumpEval()
+    SvEvalCount = SvEvalCount + 1
+    If SvEvalCount > SV_EVAL_BUDGET Then
+        Err.Raise ERR_SV_LIMIT, "SolveUtils", _
+            "Evaluation budget exceeded (" & SV_EVAL_BUDGET & " model evaluations per call). " & _
+            "Reduce request rows, max_starts, feature/variable/output columns, or use a simpler model."
+    End If
+End Sub
+
 Private Function SvLimit(ByVal v As Double, ByVal lo As Double, ByVal hi As Double) As Double
     If v < lo Then
         SvLimit = lo
@@ -139,8 +157,14 @@ Private Function SvLimit(ByVal v As Double, ByVal lo As Double, ByVal hi As Doub
 End Function
 
 ' C# SolveCore.IsBlank: null/DBNull/ExcelEmpty/ExcelMissing/空白串
+' 未分配数组 (Dim a()) 也视为未提供 — 可选表参数不得裸 LBound(...,2) 抛 Error 9
 Private Function SvIsBlank(ByVal v As Variant) As Boolean
     If IsEmpty(v) Or IsNull(v) Then SvIsBlank = True: Exit Function
+    If IsArray(v) Then
+        ' 未分配数组 (Dim a()) 与 COM 传入的空数组 (Python []) 均视为未提供
+        SvIsBlank = (VK.ArrayDims(v) = 0) Or VK.IsEmptyArray(v)
+        Exit Function
+    End If
     If VarType(v) = vbString Then
         SvIsBlank = (Len(Trim$(CStr(v))) = 0)
     End If
@@ -197,8 +221,10 @@ End Function
 
 ' data: 2D Variant (Range.Value 或 NormalizeTo2D 结果)，任意 LBound
 ' requireHistory=False 用于 request 表解析 (只做表头角色映射, 不要求历史行)
+' requireRoles=False 允许 request 表不含 Variable*/Output* 角色列 (仅按表头映射其余列)
 Private Sub SvParseSchema(ByRef data As Variant, ByRef schema As TSvSchema, _
-                          Optional ByVal requireHistory As Boolean = True)
+                          Optional ByVal requireHistory As Boolean = True, _
+                          Optional ByVal requireRoles As Boolean = True)
     Dim rLo As Long, rHi As Long, cLo As Long, cHi As Long
     Dim rows As Long, cols As Long
     Dim c As Long, i As Long, r As Long, ci As Long
@@ -257,13 +283,15 @@ Private Sub SvParseSchema(ByRef data As Variant, ByRef schema As TSvSchema, _
                 schema.Output(nOut) = c: nOut = nOut + 1
         End Select
     Next c
-    If nVar = 0 Then
-        Err.Raise ERR_SV_NO_VARIABLE, "SolveUtils", _
-            "No Variable column found. Name adjustable columns with a 'Variable*' (or '可调*'/'变量*') prefix."
-    End If
-    If nOut = 0 Then
-        Err.Raise ERR_SV_NO_OUTPUT, "SolveUtils", _
-            "No Output column found. Name result columns with an 'Output*' (or '输出*') prefix."
+    If requireRoles Then
+        If nVar = 0 Then
+            Err.Raise ERR_SV_NO_VARIABLE, "SolveUtils", _
+                "No Variable column found. Name adjustable columns with a 'Variable*' (or '可调*'/'变量*') prefix."
+        End If
+        If nOut = 0 Then
+            Err.Raise ERR_SV_NO_OUTPUT, "SolveUtils", _
+                "No Output column found. Name result columns with an 'Output*' (or '输出*') prefix."
+        End If
     End If
     If nInc + nVar + nFix > MAX_FEATURE_COLS Then
         Err.Raise ERR_SV_LIMIT, "SolveUtils", _
@@ -404,10 +432,12 @@ Private Sub SvBuildPowers(ByVal baseCount As Long, ByVal m As String, _
 End Sub
 
 ' 1D 行向量 x (0-based, 长度 baseCount) 的项值
+' 乘法溢出 (~1e200 的二次项) 转为 ERR_SV_NONFINITE, 不再抛裸 Error 6
 Private Function SvPowerProduct(ByRef x() As Double, ByRef powers() As Byte, _
                                 ByVal term As Long, ByVal baseCount As Long) As Double
     Dim v As Double: v = 1#
     Dim j As Long, e As Long, p As Double, tt As Long
+    On Error GoTo NonFinite
     For j = 1 To baseCount
         e = powers(term, j)
         If e = 1 Then
@@ -421,14 +451,20 @@ Private Function SvPowerProduct(ByRef x() As Double, ByRef powers() As Byte, _
         End If
     Next j
     SvPowerProduct = v
+    Exit Function
+NonFinite:
+    Err.Raise ERR_SV_NONFINITE, "SolveUtils", _
+        "Model term is not representable in double precision; scale feature columns down or use model=""linear""."
 End Function
 
 ' 2D 矩阵 X (rowIdx 行, 0-based 列) 的项值
+' 乘法溢出 (~1e200 的二次项) 转为 ERR_SV_NONFINITE, 不再抛裸 Error 6
 Private Function SvPowerProductM(ByRef X() As Double, ByVal rowIdx As Long, _
                                  ByRef powers() As Byte, ByVal term As Long, _
                                  ByVal baseCount As Long) As Double
     Dim v As Double: v = 1#
     Dim j As Long, e As Long, p As Double, tt As Long
+    On Error GoTo NonFinite
     For j = 1 To baseCount
         e = powers(term, j)
         If e = 1 Then
@@ -442,6 +478,10 @@ Private Function SvPowerProductM(ByRef X() As Double, ByVal rowIdx As Long, _
         End If
     Next j
     SvPowerProductM = v
+    Exit Function
+NonFinite:
+    Err.Raise ERR_SV_NONFINITE, "SolveUtils", _
+        "Model term is not representable in double precision; scale feature columns down or use model=""linear""."
 End Function
 
 ' 列均值/样本标准差；溢出时按 max 归一化重算 (对齐 C# 审查 F1 回退)
@@ -794,6 +834,7 @@ End Function
 
 Private Function SvSampleStdDev(ByRef v() As Double, ByVal n As Long) As Double
     Dim i As Long, m As Double, ss As Double, d As Double
+    On Error GoTo NonFinite
     m = 0#
     For i = 0 To n - 1: m = m + (v(i) - m) / (i + 1): Next i
     ss = 0#
@@ -802,6 +843,10 @@ Private Function SvSampleStdDev(ByRef v() As Double, ByVal n As Long) As Double
         ss = ss + d * d
     Next i
     If n > 1 And SvIsFinite(ss) Then SvSampleStdDev = Sqr(ss / (n - 1)) Else SvSampleStdDev = 0#
+    Exit Function
+NonFinite:
+    Err.Raise ERR_SV_NONFINITE, "SolveUtils", _
+        "Sample standard deviation overflowed; data magnitude is not representable in double precision."
 End Function
 
 Private Sub SvSubsetX(ByRef X() As Double, ByVal k As Long, ByRef idx() As Long, _
@@ -1007,6 +1052,7 @@ Private Function SvObjective(ByRef models() As TSvModel, ByRef target() As Doubl
     For j = 0 To outCount - 1
         If tgtMask(j) Then
             pr = SvPredict(models(j), feature)
+            SvBumpEval
             If Not SvIsFinite(pr) Then SvObjective = 1E+308: Exit Function
             dv = (pr - target(j)) / scales(j)
             fTarget = fTarget + dv * dv
@@ -1115,6 +1161,7 @@ Private Sub SvSolveInverseCore(ByRef X() As Double, ByVal n As Long, _
     Dim haveBest As Boolean
     Dim rng As TSvRng
 
+    SvEvalCount = 0   ' 单次调用预算复位 (目标函数 + 可达性采样共用)
     ' 每输出偏差尺度: 历史样本 sd (0 → 1)
     ReDim scales(0 To outCount - 1)
     For j = 0 To outCount - 1
@@ -1164,6 +1211,7 @@ Private Sub SvSolveInverseCore(ByRef X() As Double, ByVal n As Long, _
             For c = 0 To v - 1: feature(variableCols(c)) = sampleU(c): Next c
             For j = 0 To outCount - 1
                 pr = SvPredict(models(j), feature)
+                SvBumpEval
                 If SvIsFinite(pr) Then
                     If finiteCnt(j) = 0 Then
                         minOut(j) = pr: maxOut(j) = pr
@@ -1461,8 +1509,15 @@ Private Sub SvBuildBounds(ByRef schema As TSvSchema, ByRef X() As Double, ByVal 
         Next i
     Next c
 
-    If IsEmpty(bounds) Or IsNull(bounds) Then Exit Sub
+    If SvIsBlank(bounds) Then Exit Sub
     If Not IsArray(bounds) Then Exit Sub
+    ' 未分配/空数组按缺省处理; 非 2D 数组显式报错 — 不得裸 LBound(..., 2) 抛 Error 9
+    Dim bDims As Long: bDims = VK.ArrayDims(bounds)
+    If bDims = 0 Then Exit Sub
+    If bDims <> 2 Then
+        Err.Raise ERR_SV_BAD_BOUNDS, "SolveUtils", _
+            "Bounds must be a 2D range/array; got " & bDims & "D."
+    End If
     bR0 = LBound(bounds, 1): bC0 = LBound(bounds, 2)
     bRows = UBound(bounds, 1) - bR0 + 1
     bCols = UBound(bounds, 2) - bC0 + 1
@@ -1599,11 +1654,16 @@ Public Function SolveInverse(ByRef data As Variant, ByRef request As Variant, By
 
     useReq = Not SvIsBlank(request)
     If useReq Then
+        ' 未分配数组已在 SvIsBlank 按空白处理; 1D 等非 2D 输入显式报错
+        If VK.ArrayDims(request) <> 2 Then
+            Err.Raise ERR_SV_INVALID_INPUT, "SolveUtils", "'request' must be a 2D range or array."
+        End If
         If schema.RequestCount > 0 Then
             Err.Raise ERR_SV_INVALID_INPUT, "SolveUtils", _
                 "Data table must not contain request rows when a separate request table is provided."
         End If
-        SvParseSchema request, reqSchema, False
+        ' 独立 request 表只需角色映射: 允许缺 Variable*/Output* 列 (缺失按空处理)
+        SvParseSchema request, reqSchema, False, False
         SvMapRequestColumns schema, reqSchema, map
         ' 统计非空请求行
         rrLo = LBound(request, 1)
@@ -1747,19 +1807,25 @@ Private Function SvNumG6(ByVal v As Double) As String
             Loop
             If Right$(s, 1) = "." Then s = Left$(s, Len(s) - 1)
         End If
+        ' 固定格式舍入进位到 1000000 时失去 G6 语义 (999999.7 → "1000000"),
+        ' 回退科学计数分支 (与 .NET/Python %.6g 的 1E+06 一致)
+        If Val(s) >= 1000000# Then
+            s = Format$(v, "0.#####E+00")
+        End If
     Else
         s = Format$(v, "0.#####E+00")
-        ep = InStr(s, "E")
-        If ep > 0 Then
-            mant = Left$(s, ep - 1): ex = Mid$(s, ep)
-            If InStr(mant, ".") > 0 Then
-                Do While Right$(mant, 1) = "0"
-                    mant = Left$(mant, Len(mant) - 1)
-                Loop
-                If Right$(mant, 1) = "." Then mant = Left$(mant, Len(mant) - 1)
-            End If
-            s = mant & ex
+    End If
+    ' 裁剪科学计数尾数尾随零 (1.00000E+06 → 1E+06)
+    ep = InStr(s, "E")
+    If ep > 0 Then
+        mant = Left$(s, ep - 1): ex = Mid$(s, ep)
+        If InStr(mant, ".") > 0 Then
+            Do While Right$(mant, 1) = "0"
+                mant = Left$(mant, Len(mant) - 1)
+            Loop
+            If Right$(mant, 1) = "." Then mant = Left$(mant, Len(mant) - 1)
         End If
+        s = mant & ex
     End If
     SvNumG6 = Replace(s, ",", ".")
 End Function
@@ -2023,7 +2089,8 @@ Public Function SolvePredict(ByRef data As Variant, ByRef values As Variant, ByV
     SvFeatureMedians X, n, k, med
 
     SvCoerceTableArg values, "values"
-    If Not IsArray(values) Then
+    ' 未分配数组/1D 数组显式报错 — 不得裸 LBound(..., 2) 抛 Error 9
+    If VK.ArrayDims(values) <> 2 Then
         Err.Raise ERR_SV_INVALID_INPUT, "SolveUtils", "Values table must be a 2D range or array."
     End If
     vR0 = LBound(values, 1): vC0 = LBound(values, 2)
@@ -2158,7 +2225,12 @@ Private Function SvNormOpt(ByVal v As Variant) As Variant
     End If
     SvEnsureCore
     n = VK.Normalize2D(v)
-    If IsError(n) Or Not IsArray(n) Then
+    If IsError(n) Then
+        ' 显式传入但无法归一化的表 (如多区域 Range) 不得静默当缺省忽略
+        Err.Raise ERR_SV_INVALID_INPUT, "SolveUtils", _
+            "Optional table argument cannot be normalized to a 2D range/array."
+    End If
+    If Not IsArray(n) Then
         SvNormOpt = Empty
     Else
         SvNormOpt = n

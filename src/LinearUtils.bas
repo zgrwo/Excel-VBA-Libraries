@@ -75,7 +75,6 @@ Private Const ERR_HADAMARD_MISMATCH As Long = vbObjectError + 2103
 Private Const ERR_POWER_SQUARE    As Long = vbObjectError + 2104
 Private Const ERR_NEG_EXPONENT    As Long = vbObjectError + 2105
 Private Const ERR_LU_SQUARE       As Long = vbObjectError + 1060
-Private Const TOL_RANK_DEFICIENT  As Double = 1E-14  ' 秩亏判定容差 (PolyFit 回代)
 
 '=============================================================================
 ' 私有辅助函数
@@ -144,6 +143,7 @@ End Sub
 Private Function ToDoubleMatrix(ByRef v As Variant) As Double()
     Dim result() As Double, i As Long, j As Long
     Dim lb1 As Long, lb2 As Long, ub1 As Long, ub2 As Long
+    Dim cellVal As Variant
 
     ' Extract to local — do NOT mutate ByRef v (§1.1)
     Dim localV As Variant
@@ -153,7 +153,11 @@ Private Function ToDoubleMatrix(ByRef v As Variant) As Double()
         localV = v
     End If
 
+    ' R5-32: 先校验类型再 CDbl — 非数值统一 ERR_INVALID_INPUT, 不再抛裸 Error 13
     If Not IsArray(localV) Then
+        If IsError(localV) Or IsEmpty(localV) Or VarType(localV) = vbBoolean Or Not IsNumeric(localV) Then
+            Err.Raise ERR_INVALID_INPUT, "ToDoubleMatrix", "矩阵包含非数值数据。"
+        End If
         ReDim result(1 To 1, 1 To 1): result(1, 1) = CDbl(localV)
         ToDoubleMatrix = result: Exit Function
     End If
@@ -162,7 +166,12 @@ Private Function ToDoubleMatrix(ByRef v As Variant) As Double()
     ReDim result(1 To ub1 - lb1 + 1, 1 To ub2 - lb2 + 1)
     For i = 1 To UBound(result, 1)
         For j = 1 To UBound(result, 2)
-            result(i, j) = CDbl(localV(lb1 + i - 1, lb2 + j - 1))
+            cellVal = localV(lb1 + i - 1, lb2 + j - 1)
+            If IsError(cellVal) Or IsEmpty(cellVal) Or VarType(cellVal) = vbBoolean Or Not IsNumeric(cellVal) Then
+                Err.Raise ERR_INVALID_INPUT, "ToDoubleMatrix", _
+                    "矩阵包含非数值数据于 (" & i & "," & j & ")。"
+            End If
+            result(i, j) = CDbl(cellVal)
         Next j
     Next i
     ToDoubleMatrix = result
@@ -1072,6 +1081,7 @@ Public Sub QRDecomposition(ByRef A() As Double, _
     Dim i As Long, j As Long, row As Long
     Dim u() As Double, beta As Double, v As Double
     Dim ulen As Long, xnorm As Double, colMax As Double
+    Dim qrScale As Double, maxAbs As Double
 
     ValidateMatrix A, "A"
     m = MatrixRows(A): n = MatrixCols(A)
@@ -1087,6 +1097,26 @@ Public Sub QRDecomposition(ByRef A() As Double, _
     Dim cR0 As Long: cR0 = LBound(R, 2)
     Dim rQ0 As Long: rQ0 = LBound(Q, 1)
     Dim cQ0 As Long: cQ0 = LBound(Q, 2)
+
+    ' R5-15: 全局缩放 — u² 累加与 β=2/Σu² 在极端量级下会上溢 (|a|>1e154) 或下溢 (|a|<1e-162)
+    ' 迭代前 A' = A/qrScale, 迭代后 R 乘回: A = Q·(qrScale·R')
+    qrScale = 1#
+    maxAbs = 0#
+    For i = 1 To m
+        For j = 1 To n
+            If Abs(R(rR0 + i - 1, cR0 + j - 1)) > maxAbs Then maxAbs = Abs(R(rR0 + i - 1, cR0 + j - 1))
+        Next j
+    Next i
+    If maxAbs > 0# Then
+        qrScale = maxAbs
+        If qrScale <> 1# Then
+            For i = 1 To m
+                For j = 1 To n
+                    R(rR0 + i - 1, cR0 + j - 1) = R(rR0 + i - 1, cR0 + j - 1) / qrScale
+                Next j
+            Next i
+        End If
+    End If
 
     ReDim u(1 To m)
     For k = 1 To maxK
@@ -1133,6 +1163,15 @@ Public Sub QRDecomposition(ByRef A() As Double, _
         End If
     Next k
 
+    ' R5-15: 缩放还原 (Q 不变, 仅 R 乘回 qrScale)
+    If qrScale <> 1# Then
+        For i = 1 To m
+            For j = 1 To n
+                R(rR0 + i - 1, cR0 + j - 1) = R(rR0 + i - 1, cR0 + j - 1) * qrScale
+            Next j
+        Next i
+    End If
+
     ' 经济模式 (reduced QR)
     If economy Then
         Dim Rout() As Double, Qout() As Double
@@ -1175,6 +1214,7 @@ Public Sub QRDecompositionPiv(ByRef A() As Double, _
     Dim i As Long, j As Long, row As Long
     Dim u() As Double, beta As Double, v As Double
     Dim ulen As Long, xnorm As Double, colMax As Double
+    Dim qrScale As Double, maxAbs As Double
 
     ValidateMatrix A, "A"
     m = MatrixRows(A): n = MatrixCols(A)
@@ -1189,6 +1229,25 @@ Public Sub QRDecompositionPiv(ByRef A() As Double, _
     Dim cR0 As Long: cR0 = LBound(R, 2)
     Dim rQ0 As Long: rQ0 = LBound(Q, 1)
     Dim cQ0 As Long: cQ0 = LBound(Q, 2)
+
+    ' R5-15: 全局缩放 — 同 QRDecomposition, 列范数在主元选取前于缩放后矩阵上计算
+    qrScale = 1#
+    maxAbs = 0#
+    For i = 1 To m
+        For j = 1 To n
+            If Abs(R(rR0 + i - 1, cR0 + j - 1)) > maxAbs Then maxAbs = Abs(R(rR0 + i - 1, cR0 + j - 1))
+        Next j
+    Next i
+    If maxAbs > 0# Then
+        qrScale = maxAbs
+        If qrScale <> 1# Then
+            For i = 1 To m
+                For j = 1 To n
+                    R(rR0 + i - 1, cR0 + j - 1) = R(rR0 + i - 1, cR0 + j - 1) / qrScale
+                Next j
+            Next i
+        End If
+    End If
 
     ' --- Column norm bookkeeping ---
     Dim colNorms() As Double
@@ -1271,6 +1330,15 @@ Public Sub QRDecompositionPiv(ByRef A() As Double, _
             Next j
         End If
     Next k
+
+    ' R5-15: 缩放还原 (Q 不变, 仅 R 乘回 qrScale)
+    If qrScale <> 1# Then
+        For i = 1 To m
+            For j = 1 To n
+                R(rR0 + i - 1, cR0 + j - 1) = R(rR0 + i - 1, cR0 + j - 1) * qrScale
+            Next j
+        Next i
+    End If
 
     ' 经济模式 (reduced QR, 与 QRDecomposition 一致)
     If economy Then
@@ -1974,6 +2042,10 @@ Public Function MatrixConditionNumber(ByRef A As Variant, _
     Dim U() As Double, S() As Double, Vt() As Double
     Dim i As Long, k As Long
     Dim maxSigma As Double, minSigma As Double
+    Dim dimMax As Long, rankTol As Double
+
+    ' R5-16: tol<=0 归一为 SVD 收敛用默认值 (此前负 tol 会使奇异哨兵失效 → 除以零 Error 11)
+    If tol <= 0# Or tol < NUM_EPSILON Then tol = DEFAULT_TOL
 
     SVD matA, U, S, Vt, tol, maxSweeps
     k = MatrixRows(S)
@@ -1985,7 +2057,11 @@ Public Function MatrixConditionNumber(ByRef A As Variant, _
         If S(i, i) < minSigma Then minSigma = S(i, i)
     Next i
 
-    If maxSigma = 0# Or minSigma < tol * maxSigma Then
+    ' R5-16: 秩阈值改机器精度口径 (与 SingularTolerance 一致), 不再把收敛容差当奇异阈值
+    If MatrixRows(matA) > MatrixCols(matA) Then dimMax = MatrixRows(matA) Else dimMax = MatrixCols(matA)
+    rankTol = maxSigma * NUM_EPSILON * CDbl(dimMax)
+
+    If maxSigma = 0# Or minSigma = 0# Or minSigma <= rankTol Then
         MatrixConditionNumber = MAX_DOUBLE
     Else
         MatrixConditionNumber = maxSigma / minSigma
@@ -2282,13 +2358,22 @@ Public Function PolyFit(ByRef rngX As Variant, ByRef rngY As Variant, _
     Dim k As Long: k = degree + 1
     Dim coeffs() As Double: ReDim coeffs(1 To k)
     Dim row As Long, col As Long, s As Double
+    Dim maxAbsR As Double, rTol As Double
+    ' R5-04: 纯相对秩容差 (与 FitOLS 一致) — 旧实现以 |R(1,1)| 为参考形成绝对下限,
+    ' x~1e-14 时 x 列范数 ~3e-14 被误判秩亏, 斜率静默置 0
+    maxAbsR = 0#
+    For row = 1 To k
+        For col = row To k
+            If Abs(Rmat(row, col)) > maxAbsR Then maxAbsR = Abs(Rmat(row, col))
+        Next col
+    Next row
+    rTol = maxAbsR * NUM_EPSILON * CDbl(k)
     For row = k To 1 Step -1
         s = QtY(row, 1)
         For col = row + 1 To k
             s = s - Rmat(row, col) * coeffs(col)
         Next col
-        ' 标度感知容差以 R(1,1) 为参考 (QR 分解中通常最大)
-        If Abs(Rmat(row, row)) < TOL_RANK_DEFICIENT * (1# + Abs(Rmat(1, 1))) Then
+        If Rmat(row, row) = 0# Or (rTol > 0# And Abs(Rmat(row, row)) < rTol) Then
             coeffs(row) = 0#
         Else
             coeffs(row) = s / Rmat(row, row)
@@ -2321,7 +2406,12 @@ Private Function VariantToDouble1D(ByRef arr As Variant) As Double()
         Dim colLB As Long: colLB = LBound(arr, 2)
         For i = lb To ub
             v = arr(i, colLB)
-            If VarType(v) <> vbBoolean And IsNumeric(v) Then result(i) = CDbl(v) Else result(i) = 0#
+            ' R5-14: 非数值/Boolean/Empty/Error 一律报错, 与 Range 路径 (RangeToMatrix) 一致
+            If IsError(v) Or IsEmpty(v) Or VarType(v) = vbBoolean Or Not IsNumeric(v) Then
+                Err.Raise ERR_INVALID_INPUT, "VariantToDouble1D", _
+                    "输入数组含非数值数据 (索引 " & i & ")。"
+            End If
+            result(i) = CDbl(v)
         Next i
     Else
         ' 1D 数组
@@ -2330,7 +2420,12 @@ Private Function VariantToDouble1D(ByRef arr As Variant) As Double()
         ReDim result(lb To ub)
         For i = lb To ub
             v = arr(i)
-            If VarType(v) <> vbBoolean And IsNumeric(v) Then result(i) = CDbl(v) Else result(i) = 0#
+            ' R5-14: 非数值/Boolean/Empty/Error 一律报错, 与 Range 路径 (RangeToMatrix) 一致
+            If IsError(v) Or IsEmpty(v) Or VarType(v) = vbBoolean Or Not IsNumeric(v) Then
+                Err.Raise ERR_INVALID_INPUT, "VariantToDouble1D", _
+                    "输入数组含非数值数据 (索引 " & i & ")。"
+            End If
+            result(i) = CDbl(v)
         Next i
     End If
     VariantToDouble1D = result

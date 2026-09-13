@@ -47,6 +47,8 @@ Private AO As New ArrayOps
 '   vbObjectError + 1002 — 需要 2D 数组
 '   vbObjectError + 1003 — 索引/参数越界
 '   vbObjectError + 1004 — 无效输入 / 外部组件不可用
+'   vbObjectError + 1005 — 不支持多重区域
+'   vbObjectError + 1006 — 不支持的运算符
 '
 ' 一维操作:
 '   ArrayUnique       — 去重（保留首次出现顺序）
@@ -95,6 +97,7 @@ Private Const ERR_2D_REQUIRED   As Long = vbObjectError + 1002
 Private Const ERR_OUT_OF_BOUNDS As Long = vbObjectError + 1003
 Private Const ERR_INVALID_INPUT As Long = vbObjectError + 1004
 Private Const ERR_MULTI_AREA    As Long = vbObjectError + 1005
+Private Const ERR_INVALID_OP    As Long = vbObjectError + 1006
 
 '=============================================================================
 ' NormalizeToArray — Range 则提取 .Value 为数组, 单列/单行则转一维
@@ -283,6 +286,22 @@ Private Function FilterPasses(ByVal element As Variant, ByVal matchValue As Vari
     FilterPasses = vk.FilterPasses(element, matchValue, operator)
 End Function
 
+' NormalizeFilterOp — 运算符白名单校验 + Trim/LCase 归一 (与 RangeUtils 白名单一致)
+' 未知运算符必须报错, 不能静默返回空/False; 归一后的 op 供执行路径复用
+Private Function NormalizeFilterOp(ByVal operator As String, ByVal funcName As String) As String
+    Dim opNorm As String
+
+    opNorm = LCase$(Trim$(operator))
+    Select Case opNorm
+        Case "=", "<>", "<", "<=", ">", ">=", "contains", "notcontains", _
+             "startswith", "endswith", "isblank", "isnotblank", "regex"
+            ' 合法运算符
+        Case Else
+            Err.Raise ERR_INVALID_OP, funcName, "不支持的运算符: '" & CStr(operator) & "'。"
+    End Select
+    NormalizeFilterOp = opNorm
+End Function
+
 Private Function FilterEquals(ByVal a As Variant, ByVal b As Variant) As Boolean
     If IsNull(a) And IsNull(b) Then FilterEquals = True: Exit Function
     If IsNull(a) Or IsNull(b) Then FilterEquals = False: Exit Function
@@ -412,6 +431,7 @@ Public Function ArrayFilterByValue( _
     Dim i As Long, cnt As Long
     Dim data As Variant
 
+    operator = NormalizeFilterOp(operator, "ArrayFilterByValue")
     data = NormalizeToArray(arr)
     If Not IsArray(data) Then
         ' 标量按单元素数组处理 — 应用筛选条件后返回
@@ -462,6 +482,7 @@ Public Function ArrayCountIf( _
     ByVal matchValue As Variant, _
     Optional ByVal operator As String = "=") As Long
     Dim data As Variant, lb As Long, ub As Long, i As Long, cnt As Long
+    operator = NormalizeFilterOp(operator, "ArrayCountIf")
     data = NormalizeToArray(arr)
     If Not IsArray(data) Then
         If FilterPasses(data, matchValue, operator) Then ArrayCountIf = 1 Else ArrayCountIf = 0
@@ -758,6 +779,7 @@ Public Function ArrayLookup( _
     Dim retColArr() As Long, result As Variant
     Dim data As Variant
     Dim lb1 As Long, lb2 As Long   ' lower bounds (handle 0-based COM arrays)
+    Dim bad2D As Boolean
 
     ' Extract Range .Value, preserving 2D structure
     If IsObject(lookupArray) Then
@@ -776,10 +798,12 @@ Public Function ArrayLookup( _
     End If
 
     If Not IsArray(data) Then Err.Raise ERR_INVALID_INPUT, "ArrayLookup", "需要数组输入。"
+    ' 先取标志再恢复错误处理, 否则 OERN 会吞掉 ERR_2D_REQUIRED 并错报列越界 (R5-57)
     Err.Clear: On Error Resume Next
     lb2 = LBound(data, 2): nCols = UBound(data, 2) - lb2 + 1
-    If Err.Number <> 0 Then Err.Raise ERR_2D_REQUIRED, "ArrayLookup", "需要二维数组。"
+    bad2D = (Err.Number <> 0)
     On Error GoTo 0
+    If bad2D Then Err.Raise ERR_2D_REQUIRED, "ArrayLookup", "需要二维数组。"
     lb1 = LBound(data, 1): nRows = UBound(data, 1) - lb1 + 1
     If lookupCol < 1 Or lookupCol > nCols Then Err.Raise ERR_OUT_OF_BOUNDS, "ArrayLookup", "查找列越界: " & lookupCol
 
@@ -1472,6 +1496,7 @@ Public Function ArrayAny( _
     Dim lb As Long, ub As Long, i As Long
     Dim data As Variant
 
+    operator = NormalizeFilterOp(operator, "ArrayAny")
     data = NormalizeToArray(arr)
     If Not IsArray(data) Then
         ArrayAny = FilterPasses(data, matchValue, operator)
@@ -1501,6 +1526,7 @@ Public Function ArrayAll( _
     Dim lb As Long, ub As Long, i As Long
     Dim data As Variant
 
+    operator = NormalizeFilterOp(operator, "ArrayAll")
     data = NormalizeToArray(arr)
     If Not IsArray(data) Then
         ArrayAll = FilterPasses(data, matchValue, operator)

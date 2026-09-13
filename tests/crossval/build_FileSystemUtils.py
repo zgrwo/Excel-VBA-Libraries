@@ -41,6 +41,18 @@ _dotted_bytes = bytes([11, 22, 33])
 with open(_dotted_file, "wb") as f:
     f.write(_dotted_bytes)
 
+# R5-45 回归: append 模式 bom 透传 (目标文件初始无 BOM)
+_append_nobom = os.path.join(_tmp_dir, "append_nobom.txt")
+_append_bom = os.path.join(_tmp_dir, "append_bom.txt")
+for _p in (_append_nobom, _append_bom):
+    with open(_p, "wb") as f:
+        f.write(b"abc")
+
+# R5-46 回归: 空二进制文件
+_empty_bin = os.path.join(_tmp_dir, "empty.bin")
+with open(_empty_bin, "wb"):
+    pass
+
 
 def _ensure_probe_module(wb, code):
     """注入/重建探针模块 (探针内部自带错误处理器,
@@ -258,6 +270,57 @@ TEST_CASES += [
     {"name": "ReadBinaryFile_mixed_sep_unc_rejected", "func": "ReadBinaryFile",
      "args": lambda: ("/\\server/share/x",),
      "reconstruct": _fs_error_probe, "py_ref": lambda a: -2147220502.0},
+]
+
+
+# 2026-09-13 回归: R5-45 append bom 透传 / R5-46 空文件二进制数组
+def _append_bom_reconstruct(excel, wb, ws, runner, tc, args):
+    """VBA 追加写文件后, Python 侧按字节校验 BOM 语义."""
+    path, bom = args[0], args[1]
+    _ensure_probe_module(wb,
+        "Public Sub WTA(ByVal p As String, ByVal b As Boolean)\r\n"
+        "    WriteTextFile p, \"def\", \"UTF-8\", True, b\r\n"
+        "End Sub")
+    run_macro(excel, wb, "FSProbe.WTA", path, bom)
+    with open(path, "rb") as f:
+        data = f.read()
+    expected = (b"\xef\xbb\xbf" if bom else b"") + b"abcdef"
+    return float(1 if data == expected else 0), 1.0, 0.0
+
+
+def _empty_binary_reconstruct(excel, wb, ws, runner, tc, args):
+    """空文件 ReadBinaryFile 返回空 Byte() (VBA 无法本地分配零长度类型数组)。
+
+    契约: outOk=True 且 IsEmptyArray(b)=True (未分配/零长度);
+    VBA 测试的 IsEmptyArray 探针在空数组上返回 True, 裸 UBound 不可用。
+    """
+    _ensure_probe_module(wb,
+        "Public Function ProbeEmptyBin(ByVal p As String) As Double\r\n"
+        "    On Error GoTo EH\r\n"
+        "    Dim b() As Byte\r\n"
+        "    Dim ok As Boolean\r\n"
+        "    Dim vk As VariantKit\r\n"
+        "    Set vk = New VariantKit\r\n"
+        "    b = ReadBinaryFile(p, ok)\r\n"
+        "    If Not ok Then ProbeEmptyBin = -1: Exit Function\r\n"
+        "    If vk.IsEmptyArray(b) Then ProbeEmptyBin = 1 Else ProbeEmptyBin = 0\r\n"
+        "    Exit Function\r\n"
+        "EH: ProbeEmptyBin = Err.Number\r\n"
+        "End Function")
+    err_num = run_macro(excel, wb, "FSProbe.ProbeEmptyBin", args[0])
+    return float(err_num), 1.0, 0.0
+
+
+TEST_CASES += [
+    {"name": "WriteTextFile_append_no_bom", "func": "WriteTextFile",
+     "args": lambda: (_append_nobom, False),
+     "reconstruct": _append_bom_reconstruct, "py_ref": lambda a: 1.0},
+    {"name": "WriteTextFile_append_keep_bom", "func": "WriteTextFile",
+     "args": lambda: (_append_bom, True),
+     "reconstruct": _append_bom_reconstruct, "py_ref": lambda a: 1.0},
+    {"name": "ReadBinaryFile_empty", "func": "ReadBinaryFile",
+     "args": lambda: (_empty_bin,),
+     "reconstruct": _empty_binary_reconstruct, "py_ref": lambda a: 1.0},
 ]
 
 

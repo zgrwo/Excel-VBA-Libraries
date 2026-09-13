@@ -42,6 +42,7 @@ Private Const RANK_TOL As Double = 1E-15                 ' Rank determination to
 Private Const MAX_CATEGORICAL_LEVELS As Long = 50
 Private Const MAX_GRID_COMBOS As Long = 200000
 Private Const PI As Double = 3.14159265358979
+Private Const ERR_INVALID_INPUT As Long = vbObjectError + 1001
 Private Const ERR_INVALID_DATA  As Long = vbObjectError + 3001
 Private Const ERR_UNDERDETERM   As Long = vbObjectError + 3002
 Private Const ERR_UNKNOWN_LEVEL As Long = vbObjectError + 3004
@@ -159,7 +160,7 @@ Private Function GetCategoricalLevels(ByRef dataArr As Variant, ByVal col As Lon
     If nLev > 1 Then
         For i = LBound(result) To UBound(result) - 1
             For j = i + 1 To UBound(result)
-                If StrComp(result(i), result(j), vbTextCompare) > 0 Then
+                If StrComp(result(i), result(j), vbBinaryCompare) > 0 Then
                     tmp = result(i): result(i) = result(j): result(j) = tmp
                 End If
             Next
@@ -927,7 +928,6 @@ Public Function FactorImportance(ByVal data As Variant, _
     Dim numRows As Long, numCols As Long
     Dim firstDataRow As Long, lastDataRow As Long
     Dim n As Long
-    Dim e1() As Variant, e2() As Variant
     Dim dm As Object
     Dim X() As Double, y() As Double
     Dim coefNames As Variant
@@ -958,7 +958,8 @@ Public Function FactorImportance(ByVal data As Variant, _
     lastDataRow = numRows
     n = lastDataRow - firstDataRow + 1
     If n < 3 Then
-        ReDim e1(1 To 1, 1 To 1): e1(1, 1) = "Need >=3 data rows": FactorImportance = e1: Exit Function
+        Err.Raise ERR_TOO_FEW_ROWS, "FactorImportance", _
+            "需要至少 3 行数据 (当前 " & n & " 行)。"
     End If
 
     Set dm = BuildDesignMatrix(dataArr, factorCols, resultCol, firstDataRow, lastDataRow, hasHeader)
@@ -1037,7 +1038,8 @@ Public Function FactorImportance(ByVal data As Variant, _
 
     numFactors = fImport.Count
     If numFactors < 1 Then
-        ReDim e2(1 To 1, 1 To 1): e2(1, 1) = "No factors in design matrix": FactorImportance = e2: Exit Function
+        Err.Raise ERR_INVALID_DATA, "FactorImportance", _
+            "设计矩阵中没有有效因子。"
     End If
 
     ' 构建未排序表格 (每个因子一行, 而非每个哑变量列一行)
@@ -1106,7 +1108,6 @@ Public Function InteractionEffects(ByVal data As Variant, _
     Dim numRows As Long, numCols As Long
     Dim firstDataRow As Long, lastDataRow As Long
     Dim n As Long
-    Dim e1() As Variant, e2() As Variant
     Dim dm As Object
     Dim X() As Double, y() As Double
     Dim coefNames As Variant
@@ -1137,7 +1138,8 @@ Public Function InteractionEffects(ByVal data As Variant, _
     lastDataRow = numRows
     n = lastDataRow - firstDataRow + 1
     If n < 5 Then
-        ReDim e1(1 To 1, 1 To 1): e1(1, 1) = "Need >=5 data rows": InteractionEffects = e1: Exit Function
+        Err.Raise ERR_TOO_FEW_ROWS, "InteractionEffects", _
+            "需要至少 5 行数据 (当前 " & n & " 行)。"
     End If
 
     Set dm = BuildDesignMatrix(dataArr, factorCols, resultCol, firstDataRow, lastDataRow, hasHeader)
@@ -1158,7 +1160,8 @@ Public Function InteractionEffects(ByVal data As Variant, _
     Dim fkLb As Long: fkLb = LBound(factorKeys)
 
     If nf < 2 Then
-        ReDim e2(1 To 1, 1 To 1): e2(1, 1) = "Need >=2 factors for interactions": InteractionEffects = e2: Exit Function
+        Err.Raise ERR_INVALID_DATA, "InteractionEffects", _
+            "交互效应检验需要至少 2 个因子 (当前 " & nf & " 个)。"
     End If
 
     numPairs = nf * (nf - 1) \ 2
@@ -1334,14 +1337,23 @@ Public Function ANOVAOneWay(ByVal data As Variant, _
     n = numRows - firstDataRow + 1
 
     ' 收集各水平的数据
-    Set groups = DP.Create()
+    ' 水平键按 BinaryCompare: 'A' 与 'a' 为不同水平 (与 GetCategoricalLevels/预测编码一致)
+    Set groups = DP.Create(vbBinaryCompare)
     For r = firstDataRow To numRows
-        key = CStr(dataArr(r, factorCol))
-        If Not groups.Exists(key) Then
-            groups.Add key, DP.Create()
-            groups(key).Add "count", 0
-            groups(key).Add "sum", 0#
-            groups(key).Add "sumsq", 0#
+        v = dataArr(r, factorCol)
+        If IsEmpty(v) Or IsNull(v) Then
+            ' 空白因子值按无效行排除 (与回归列表删除语义一致)
+        ElseIf IsError(v) Then
+            Err.Raise ERR_INVALID_INPUT, "ANOVAOneWay", _
+                "因子列第 " & r & " 行含错误值，无法分组。"
+        Else
+            key = CStr(v)
+            If Not groups.Exists(key) Then
+                groups.Add key, DP.Create()
+                groups(key).Add "count", 0
+                groups(key).Add "sum", 0#
+                groups(key).Add "sumsq", 0#
+            End If
         End If
     Next
 
@@ -1354,17 +1366,25 @@ Public Function ANOVAOneWay(ByVal data As Variant, _
         If Not IsNumericCell(dataArr(r, resultCol)) Then
             ' 跳过结果列缺失的行
         Else
-            key = CStr(dataArr(r, factorCol))
-            val = CDbl(dataArr(r, resultCol))
-            If Not yShiftSet Then yShift = val: yShiftSet = True
-            valC = val - yShift
-            idx = idx + 1
-            allValues(idx) = val
-            grandSum = grandSum + valC
-            Set grp = groups(key)
-            grp("count") = grp("count") + 1
-            grp("sum") = grp("sum") + valC
-            grp("sumsq") = grp("sumsq") + valC * valC
+            v = dataArr(r, factorCol)
+            If IsEmpty(v) Or IsNull(v) Then
+                ' 空白因子行按无效行排除
+            ElseIf IsError(v) Then
+                Err.Raise ERR_INVALID_INPUT, "ANOVAOneWay", _
+                    "因子列第 " & r & " 行含错误值，无法分组。"
+            Else
+                key = CStr(v)
+                val = CDbl(dataArr(r, resultCol))
+                If Not yShiftSet Then yShift = val: yShiftSet = True
+                valC = val - yShift
+                idx = idx + 1
+                allValues(idx) = val
+                grandSum = grandSum + valC
+                Set grp = groups(key)
+                grp("count") = grp("count") + 1
+                grp("sum") = grp("sum") + valC
+                grp("sumsq") = grp("sumsq") + valC * valC
+            End If
         End If
     Next
     n = idx  ' 更新为有效行数 (列表删除)
@@ -1408,10 +1428,18 @@ Public Function ANOVAOneWay(ByVal data As Variant, _
         If Not IsNumericCell(dataArr(r, resultCol)) Then
             ' 跳过结果列缺失的行
         Else
-            key = CStr(dataArr(r, factorCol))
-            valC = CDbl(dataArr(r, resultCol)) - yShift
-            Set grp = groups(key)
-            ssw = ssw + (valC - grp("meanC")) * (valC - grp("meanC"))
+            v = dataArr(r, factorCol)
+            If IsEmpty(v) Or IsNull(v) Then
+                ' 空白因子行按无效行排除
+            ElseIf IsError(v) Then
+                Err.Raise ERR_INVALID_INPUT, "ANOVAOneWay", _
+                    "因子列第 " & r & " 行含错误值，无法分组。"
+            Else
+                key = CStr(v)
+                valC = CDbl(dataArr(r, resultCol)) - yShift
+                Set grp = groups(key)
+                ssw = ssw + (valC - grp("meanC")) * (valC - grp("meanC"))
+            End If
         End If
     Next
 
@@ -1574,6 +1602,11 @@ Public Function LinearModelPredict(ByVal model As Object, ByVal newData As Varia
     If IsObject(newData) Then
         If TypeOf newData Is Range Then
             Set rng = newData
+            ' 单格/过短 Range 对多因子模型会静默补 0, 必须显式报错
+            If rng.Count < nf Then
+                Err.Raise ERR_INVALID_DATA, "LinearModelPredict", _
+                    "预测数据仅含 " & rng.Count & " 个单元格，但模型需要 " & nf & " 个因子值。"
+            End If
             If rng.Columns.Count = 1 And rng.Rows.Count > 1 Then
                 ' 纵向单列: 逐行读取, 不越界到相邻列 (Cells(1, fi+1) 会读到区域外的单元格)
                 For fi = 0 To nf - 1
@@ -1640,7 +1673,6 @@ Public Function FactorSweep(ByVal model As Object, _
     Dim colInfo As Object
     Dim origCol As Long
     Dim levs As Variant
-    Dim e2() As Variant
     Dim out() As Variant
     Dim si As Long
     Dim targetCol As Long
@@ -1693,10 +1725,12 @@ Public Function FactorSweep(ByVal model As Object, _
 
     ' 生成扫描
     If factorIndex < 1 Or factorIndex > nf Then
-        ReDim e2(1 To 1, 1 To 1): e2(1, 1) = "factorIndex out of range": FactorSweep = e2: Exit Function
+        Err.Raise ERR_INVALID_PARAM, "FactorSweep", _
+            "factorIndex (" & factorIndex & ") 超出因子序号范围 [1, " & nf & "]。"
     End If
     If steps < 0 Then
-        ReDim e2(1 To 1, 1 To 1): e2(1, 1) = "steps must be >= 0": FactorSweep = e2: Exit Function
+        Err.Raise ERR_INVALID_PARAM, "FactorSweep", _
+            "steps 必须 >= 0 (当前 " & steps & ")。"
     End If
 
     ReDim out(1 To steps + 1, 1 To 2)
@@ -1757,7 +1791,6 @@ Public Function OptimizeFactors(ByVal data As Variant, _
     Dim si As Long
     Dim boolVals() As Double
     Dim catVals() As String
-    Dim e2() As Variant
     Dim resultCount As Long
     Dim bestVals() As Double
     Dim bestRows() As Variant
@@ -1849,15 +1882,19 @@ Public Function OptimizeFactors(ByVal data As Variant, _
     Next
 
     If totalCombos > MAX_GRID_COMBOS Then
-        ReDim e2(1 To 1, 1 To 1)
-        e2(1, 1) = "Grid too large: " & Format(totalCombos, "#,##0") & " combos > " & MAX_GRID_COMBOS & ". Reduce nSteps."
-        OptimizeFactors = e2: Exit Function
+        Err.Raise ERR_INVALID_PARAM, "OptimizeFactors", _
+            "网格过大: " & Format(totalCombos, "#,##0") & " 种组合 > 上限 " & MAX_GRID_COMBOS & "。请减少 nSteps。"
     End If
 
     ' 网格搜索
     resultCount = 0
     ReDim bestVals(1 To topN)
     ReDim bestRows(1 To topN, 1 To nf + 1)
+    If IsEmpty(goal) Or IsNull(goal) Then
+        ' 空单元格不得静默按目标 0 优化 (IsNumeric(Empty)=True)
+        Err.Raise ERR_INVALID_PARAM, "OptimizeFactors", _
+            "goal 不能为空 (支持 max/min/target 或数值目标)。"
+    End If
     If IsNumeric(goal) Then
         goalMode = "target"
     Else

@@ -74,8 +74,10 @@ Private Const ERR_OUT_OF_BOUNDS As Long = vbObjectError + 1002
 '   Easter              — 复活节日期
 '
 ' 注意事项:
-'   - DaysInMonth 单参数调用时将参数视为日期而非年份（如 DaysInMonth(2024)
-'     解读为 1905-07-17 的序列号，而非 2024 年）。请使用双参数 (year, month)。
+'   - 单参数日期语义统一: DaysInMonth(2024) 与 FirstDayOfMonth(2024) 等均按
+'     Excel 序列号解释 (1905-07-16), 而非年份 2024。年份请用 DaysInMonth(2024, m)。
+'   - 日期入参经 CoerceDate 归一化: vbDate / 日期字符串 / 序列号 1..2958465 /
+'     Empty (省略或空白 → 今天); 错误值 / Null / Boolean / 非法字符串 → 报错。
 '   - VBA-only 函数 (Age, DateDiffParts) 返回 Dictionary，仅限 VBA 调用。
 '=====================================================================
 
@@ -108,6 +110,71 @@ Private Function ExtractHolidays(ByRef holidays As Variant) As Variant
 End Function
 
 '=============================================================================
+' CoerceDate — 日期入参归一化 (R5-02 / R5-23)
+'
+' 接受: vbDate | 日期字符串 (IsDate) | Excel 日期序列号 (1..2958465) | Empty (→ 今天)
+' 拒绝: Error / Null / Boolean / 非法字符串 / 越界数值 → Err.Raise ERR_INVALID_INPUT
+' 注: IsDate 对数值返回 False (SKILL §3.3), 故数值/数值字符串先走序列号分支;
+'     "45000" 这类数值字符串按序列号解释 (与 DaysInMonth 单参数契约一致)。
+'=============================================================================
+Private Function CoerceDate(ByVal v As Variant) As Date
+    Dim dbl As Double
+    If IsEmpty(v) Then
+        CoerceDate = Date
+        Exit Function
+    End If
+    If IsObject(v) Then
+        If TypeOf v Is Range Then
+            If v.Cells.Count = 1 Then
+                v = v.Value
+            Else
+                Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", _
+                    "日期参数不支持多单元格 Range, 请传入单值。"
+            End If
+        Else
+            Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", _
+                "不支持的日期参数类型: " & TypeName(v)
+        End If
+    End If
+    If IsArray(v) Then
+        Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", _
+            "日期参数不支持数组, 请传入单值。"
+    End If
+    If IsEmpty(v) Then
+        CoerceDate = Date
+        Exit Function
+    End If
+    If IsError(v) Then
+        Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", "日期参数为错误值: " & CStr(v)
+    End If
+    If IsNull(v) Then
+        Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", "日期参数为 Null。"
+    End If
+    If VarType(v) = vbBoolean Then
+        Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", "日期参数不能为 Boolean。"
+    End If
+    If VarType(v) = vbDate Then
+        CoerceDate = CDate(v)
+        Exit Function
+    End If
+    If IsDate(v) Then
+        CoerceDate = CDate(v)
+        Exit Function
+    End If
+    If IsNumeric(v) Then
+        dbl = CDbl(v)
+        If dbl >= 1# And dbl <= 2958465# Then
+            CoerceDate = CDate(dbl)
+            Exit Function
+        End If
+        Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", _
+            "日期序列号 " & CStr(dbl) & " 超出范围 1..2958465。"
+    End If
+    Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", _
+        "无法识别的日期输入 (" & TypeName(v) & ")"
+End Function
+
+'=============================================================================
 ' ISOWeekNum — ISO 8601 周数
 '
 ' 规则: 包含当年第一个星期四的那一周为第 1 周
@@ -117,8 +184,7 @@ Public Function ISOWeekNum(ByVal d As Variant) As Long
     If IsObject(d) Then
         If TypeOf d Is Range Then d = d.Value
     End If
-    If VarType(d) <> vbDate Then If Not IsDate(d) Then ISOWeekNum = 0: Exit Function
-    d = Int(CDate(d))
+    d = Int(CoerceDate(d))
     Dim y As Long
     Dim jan4 As Date
     Dim firstMonday As Date
@@ -160,22 +226,12 @@ End Function
 ' FirstDayOfMonth / LastDayOfMonth
 '=============================================================================
 Public Function FirstDayOfMonth(Optional ByVal d As Variant) As Date
-    If IsMissing(d) Then d = Date
-    If IsNull(d) Then d = Date
-    If VarType(d) <> vbDate Then
-        If Not IsDate(d) Then d = Date
-    End If
-    d = CDate(d)
+    d = CoerceDate(d)
     FirstDayOfMonth = DateSerial(Year(d), Month(d), 1)
 End Function
 
 Public Function LastDayOfMonth(Optional ByVal d As Variant) As Date
-    If IsMissing(d) Then d = Date
-    If IsNull(d) Then d = Date
-    If VarType(d) <> vbDate Then
-        If Not IsDate(d) Then d = Date
-    End If
-    d = CDate(d)
+    d = CoerceDate(d)
     If Year(d) >= 9999 And Month(d) = 12 Then
         LastDayOfMonth = DateSerial(9999, 12, 31)
     Else
@@ -187,23 +243,13 @@ End Function
 ' FirstDayOfQuarter / LastDayOfQuarter
 '=============================================================================
 Public Function FirstDayOfQuarter(Optional ByVal d As Variant) As Date
-    If IsMissing(d) Then d = Date
-    If IsNull(d) Then d = Date
-    If VarType(d) <> vbDate Then
-        If Not IsDate(d) Then d = Date
-    End If
-    d = CDate(d)
+    d = CoerceDate(d)
     Dim q As Long: q = Quarter(d)
     FirstDayOfQuarter = DateSerial(Year(d), (q - 1) * 3 + 1, 1)
 End Function
 
 Public Function LastDayOfQuarter(Optional ByVal d As Variant) As Date
-    If IsMissing(d) Then d = Date
-    If IsNull(d) Then d = Date
-    If VarType(d) <> vbDate Then
-        If Not IsDate(d) Then d = Date
-    End If
-    d = CDate(d)
+    d = CoerceDate(d)
     Dim q As Long: q = Quarter(d)
     If Year(d) >= 9999 And q = 4 Then
         LastDayOfQuarter = DateSerial(9999, 12, 31)
@@ -255,14 +301,30 @@ Public Function DaysInMonth(Optional ByVal y As Variant, Optional ByVal m As Var
         Err.Raise ERR_OUT_OF_BOUNDS, "DateTimeUtils", _
             "DaysInMonth: month " & CStr(mm) & " is out of range (1..12)"
     End If
-    DaysInMonth = Day(DateSerial(yy, mm + 1, 0))
+    If yy = 9999 And mm = 12 Then
+        ' R5-56: DateSerial(9999, 13, 0) 抛 Error 5; 与 LastDayOfMonth 守卫对齐
+        DaysInMonth = 31
+    Else
+        DaysInMonth = Day(DateSerial(yy, mm + 1, 0))
+    End If
 End Function
 
 Public Function DaysInYear(Optional ByVal y As Variant) As Long
-    If IsMissing(y) Then y = Year(Date)
-    If IsNull(y) Or IsEmpty(y) Then y = Year(Date)
-    If Not IsNumeric(y) Then y = Year(Date)
-    Dim yy As Long: yy = CLng(Val(CStr(y)))
+    Dim yy As Long
+    If IsMissing(y) Or IsEmpty(y) Then
+        yy = Year(Date)
+    ElseIf IsArray(y) Or IsObject(y) Then
+        Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", _
+            "DaysInYear: 不支持数组/Range, 请传入单值。"
+    ElseIf VarType(y) = vbDate Or IsDate(y) Then
+        ' R5-24: 日期/日期字符串取所在年份 (此前静默使用当前年)
+        yy = Year(CDate(y))
+    ElseIf IsError(y) Or IsNull(y) Or VarType(y) = vbBoolean Or Not IsNumeric(y) Then
+        Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", _
+            "DaysInYear: 需要年份数值或日期, 实际为 " & TypeName(y) & "。"
+    Else
+        yy = CLng(Val(CStr(y)))
+    End If
     If yy < 100 Or yy > 9999 Then
         Err.Raise ERR_OUT_OF_BOUNDS, "DateTimeUtils", _
             "DaysInYear: year " & CStr(yy) & " is out of range (100..9999)"
@@ -271,9 +333,8 @@ Public Function DaysInYear(Optional ByVal y As Variant) As Long
 End Function
 
 Public Function DayOfYear(ByVal d As Variant) As Long
-    If VarType(d) <> vbDate Then If Not IsDate(d) Then DayOfYear = 0: Exit Function
-    d = CDate(d)
-    DayOfYear = DateDiff("d", DateSerial(Year(d), 1, 0), d)
+    Dim dt As Date: dt = Int(CoerceDate(d))
+    DayOfYear = DateDiff("d", DateSerial(Year(dt), 1, 0), dt)
 End Function
 
 '=============================================================================
@@ -291,20 +352,18 @@ Public Function IsLeapYear(ByVal y As Variant) As Boolean
         On Error GoTo 0
     End If
 
-    If IsNull(y) Or IsEmpty(y) Then
-        IsLeapYear = False
-        Exit Function
-    End If
-    ' Accept both numeric years and date values (Date, Date string, date serial)
+    ' Accept both numeric years and date values (R5-02: 非法输入报错, 不再静默 False)
     Dim yy As Long
-    If IsDate(y) Then
+    If IsEmpty(y) Then
+        yy = Year(Date)
+    ElseIf VarType(y) = vbDate Or IsDate(y) Then
         yy = Year(CDate(y))
-    ElseIf IsNumeric(y) Then
+    ElseIf IsError(y) Or IsNull(y) Or VarType(y) = vbBoolean Or Not IsNumeric(y) Then
+        Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", _
+            "IsLeapYear: 需要年份数值或日期, 实际为 " & TypeName(y) & "。"
+    Else
         ' Val() handles strings like "1,234" that IsNumeric accepts but CLng rejects
         yy = CLng(Val(CStr(y)))
-    Else
-        IsLeapYear = False
-        Exit Function
     End If
     IsLeapYear = (yy Mod 4 = 0 And yy Mod 100 <> 0) Or (yy Mod 400 = 0)
 End Function
@@ -313,12 +372,7 @@ End Function
 ' Quarter — 返回季度 1-4
 '=============================================================================
 Public Function Quarter(Optional ByVal d As Variant) As Long
-    If IsMissing(d) Then d = Date
-    If IsNull(d) Then d = Date
-    If VarType(d) <> vbDate Then
-        If Not IsDate(d) Then d = Date
-    End If
-    Quarter = (Month(CDate(d)) - 1) \ 3 + 1
+    Quarter = (Month(CoerceDate(d)) - 1) \ 3 + 1
 End Function
 
 '=============================================================================
@@ -566,12 +620,7 @@ Public Function FiscalYear( _
     Optional ByVal d As Variant, _
     Optional ByVal startMonth As Long = 1) As Long
 
-    If IsMissing(d) Then d = Date
-    If IsNull(d) Then d = Date
-    If VarType(d) <> vbDate Then
-        If Not IsDate(d) Then d = Date
-    End If
-    d = CDate(d)
+    d = CoerceDate(d)
 
     If startMonth < 1 Or startMonth > 12 Then startMonth = 1
 
@@ -600,24 +649,21 @@ Public Function UnixToDate(ByVal ts As Variant) As Date
 End Function
 
 Public Function DateToUnix(ByVal d As Variant) As Double
-    If IsNull(d) Or Not IsDate(d) Then
-        DateToUnix = 0#
-        Exit Function
-    End If
+    ' R5-02/R5-23: 序列号/日期字符串/日期均可, 非法输入报错 (此前静默返回 0)
     ' 使用 DateValue 去除时间分量（仅保留日期，丢弃时分秒信息）
     ' 设计限制: 时间分量丢失；若需保留时间精度，请使用 UnixTimestamp 函数
     ' 使用 Double 运算避免 DateDiff("s") Long 溢出（2038-01-19 限制）
-    DateToUnix = CDbl(CDbl(DateValue(CDate(d))) - CDbl(DateValue(#1/1/1970#))) * 86400#
+    DateToUnix = CDbl(CDbl(DateValue(CoerceDate(d))) - CDbl(DateValue(#1/1/1970#))) * 86400#
 End Function
 
 '=============================================================================
 ' IsWeekend — 判断是否为周末 (周六或周日)
 '=============================================================================
 Public Function IsWeekend(ByVal d As Variant) As Boolean
-    If VarType(d) <> vbDate Then If Not IsDate(d) Then Exit Function
-    d = CDate(d)
+    ' R5-23: 序列号/日期字符串/日期均可, 非法输入报错 (此前静默 False)
+    Dim dt As Date: dt = Int(CoerceDate(d))
     Dim wd As Long
-    wd = Weekday(d, vbSunday)
+    wd = Weekday(dt, vbSunday)
     IsWeekend = (wd = vbSaturday Or wd = vbSunday)
 End Function
 
@@ -695,8 +741,15 @@ Public Function IsHoliday(ByVal d As Date, ByVal holidays As Variant) As Boolean
             On Error GoTo 0
         End If
     Else
-        Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", _
-            "Unsupported holidays type: " & TypeName(holidays) & ". Expected Range, Dictionary, or Array."
+        ' R5-44: 标量节假日 (Date / 日期字符串 / 序列号 / Empty) 按单元素列表处理,
+        ' 与 WorkdaysBetween/NextWorkday 的 ExtractHolidays 语义一致
+        holidayData = ExtractHolidays(holidays)
+        For i = LBound(holidayData) To UBound(holidayData)
+            If HolidayMatch(holidayData(i), d) Then
+                IsHoliday = True
+                Exit Function
+            End If
+        Next i
     End If
 End Function
 
@@ -884,7 +937,8 @@ End Function
 
 Public Function UDF_DT_ISOWEEKNUM(ByVal d As Variant) As Variant
     On Error GoTo ErrHandler
-    UDF_DT_ISOWEEKNUM = ISOWeekNum(CDate(d))
+    ' 原始 d 传入核心统一 CoerceDate: Empty→今天, 错误值/非法输入→CVErr (R5-02)
+    UDF_DT_ISOWEEKNUM = ISOWeekNum(d)
     Exit Function
 ErrHandler:
     UDF_DT_ISOWEEKNUM = CVErr(xlErrValue)
@@ -940,7 +994,7 @@ End Function
 
 Public Function UDF_DT_DAYOFYEAR(ByVal d As Variant) As Variant
     On Error GoTo ErrHandler
-    UDF_DT_DAYOFYEAR = DayOfYear(CDate(d))
+    UDF_DT_DAYOFYEAR = DayOfYear(d)
     Exit Function
 ErrHandler:
     UDF_DT_DAYOFYEAR = CVErr(xlErrValue)
@@ -988,7 +1042,7 @@ End Function
 
 Public Function UDF_DT_ISWEEKEND(ByVal d As Variant) As Variant
     On Error GoTo ErrHandler
-    UDF_DT_ISWEEKEND = IsWeekend(CDate(d))
+    UDF_DT_ISWEEKEND = IsWeekend(d)
     Exit Function
 ErrHandler:
     UDF_DT_ISWEEKEND = CVErr(xlErrValue)

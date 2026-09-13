@@ -252,6 +252,10 @@ sql = "SELECT * FROM [Data$] WHERE Name = '" & userInput & "'"
 3. 对于 `IN` 子句中的值列表，转义每个元素
 4. LIKE 模式使用 `forLike:=True`：ACE/Jet 用方括号字符类转义（`%`→`[%]`、`_`→`[_]`、`[`→`[[]`），反斜杠**不是** ACE 的转义符（实测 `LIKE '100\%'` 匹配不到 `100%`，`LIKE 'a\[b'` 直接报 5003071 无效模式串）
 
+> **⚠️ 适用路径边界 (R5-26)**：`forLike:=True` 的方括号字符类转义**仅对 ACE/Jet SQL 文本执行路径有效**（`SqlExecute` / `SqlQuery` / `SqlJoin` / `SqlGroupBy`）。
+> `SqlRangeQuery` 的 WHERE 子句交由 ADODB `Recordset.Filter` 执行，其 LIKE 引擎把 `[` `]` 当作**字面量**（`V LIKE '100[%]'` 命中字面量 `100[%]` 而非 `100%`），也不支持 `IN` / `NOT IN` / `BETWEEN`。
+> 不要对 Filter 路径使用 `forLike:=True`；单单元格 Range 输入直接原样返回，不解析/应用 WHERE（`tableAlias` 仅作占位）。
+
 ## 11. Related Skills
 
 其他 Skill 文件及文档的加载时机见 [AGENTS.md](../AGENTS.md) 文档路由表。

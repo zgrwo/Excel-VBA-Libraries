@@ -30,6 +30,7 @@ Private DP As New DictProxy
 '   数学未定义 (零方差等)       →  CVErr(xlErrDiv0)  / #DIV/0!
 '   无效参数 (负数对数等)       →  CVErr(xlErrNum)   / #NUM!
 '   无结果 (无众数等)           →  CVErr(xlErrNA)    / #N/A
+'   注: 数据中的 Error 值不再按列表删除处理, 一律视为无效输入报错 (R5-21)
 '
 ' 基础描述:
 '   Mean           — 算术均值
@@ -84,6 +85,7 @@ Private DP As New DictProxy
 Private Const ERR_INVALID_INPUT As Long = vbObjectError + 1001
 Private Const ERR_DIV_BY_ZERO    As Long = vbObjectError + 1002
 Private Const ERR_NOT_AVAIL      As Long = vbObjectError + 1003
+Private Const ERR_NUM_DOMAIN     As Long = vbObjectError + 1004
 Private Const DBL_INSERTION_THRESHOLD As Long = 16
 
 ' Numerical tolerance constants
@@ -144,6 +146,8 @@ End Function
 ' ExtractDoubles — 从 Variant 提取 Double 数组
 '
 ' 支持: Range (单列/单行), 1D Variant 数组, 2D 数组 (可用 colIndex 指定列)
+' 注意 (R5-21): Error 值不再按列表删除处理 — 检测到 IsError 一律
+'              Err.Raise ERR_INVALID_INPUT (与 AVERAGE 遇错误值的行为对齐)
 '=============================================================================
 Private Function ExtractDoubles( _
     ByRef data As Variant, _
@@ -181,6 +185,9 @@ Private Function ExtractDoubles( _
             Exit Function
         End If
         If rng.Count = 1 Then
+            If IsError(rng.Value) Then
+                Err.Raise ERR_INVALID_INPUT, "ExtractDoubles", "数据包含错误值。"
+            End If
             If IsNumeric(rng.Value) Then
                 ReDim result(0 To 0)
                 result(0) = CDbl(rng.Value)
@@ -197,6 +204,9 @@ Private Function ExtractDoubles( _
     End If
 
     If Not IsArray(localData) Then
+        If IsError(localData) Then
+            Err.Raise ERR_INVALID_INPUT, "ExtractDoubles", "数据包含错误值。"
+        End If
         If IsNumeric(localData) Then
             ReDim result(0 To 0)
             result(0) = CDbl(localData)
@@ -224,6 +234,9 @@ Private Function ExtractDoubles( _
         ReDim result(0 To ub1 - lb1)
         cnt = 0
         For i = lb1 To ub1
+            If IsError(arrData(i)) Then
+                Err.Raise ERR_INVALID_INPUT, "ExtractDoubles", "数据包含错误值 (索引 " & i & ")。"
+            End If
             If Not IsEmpty(arrData(i)) And VarType(arrData(i)) <> vbBoolean And IsNumeric(arrData(i)) Then
                 result(cnt) = CDbl(arrData(i))
                 cnt = cnt + 1
@@ -262,6 +275,9 @@ Private Function ExtractDoubles( _
     ReDim result(0 To nRows - r0)
     cnt = 0
     For i = r0 To nRows
+        If IsError(arrData(i, targetCol)) Then
+            Err.Raise ERR_INVALID_INPUT, "ExtractDoubles", "数据包含错误值 (行 " & i & ")。"
+        End If
         If Not IsEmpty(arrData(i, targetCol)) And VarType(arrData(i, targetCol)) <> vbBoolean And IsNumeric(arrData(i, targetCol)) Then
             result(cnt) = CDbl(arrData(i, targetCol))
             cnt = cnt + 1
@@ -475,7 +491,7 @@ Public Function GeometricMean(ByRef data As Variant, Optional ByVal colIndex As 
     logSum = 0#: kC = 0#
     For i = lb To UBound(arr)
         If arr(i) <= 0# Then
-            Err.Raise ERR_INVALID_INPUT, "GeometricMean", "所有值必须为正数。"
+            Err.Raise ERR_NUM_DOMAIN, "GeometricMean", "所有值必须为正数。"
             Exit Function
         End If
         kY = Log(arr(i)) - kC: kT = logSum + kY: kC = (kT - logSum) - kY: logSum = kT
@@ -506,7 +522,7 @@ Public Function HarmonicMean(ByRef data As Variant, Optional ByVal colIndex As L
 
     For i = lb To UBound(arr)
         If arr(i) <= 0# Then
-            Err.Raise ERR_INVALID_INPUT, "HarmonicMean", "所有值必须为正数。"
+            Err.Raise ERR_NUM_DOMAIN, "HarmonicMean", "所有值必须为正数。"
             Exit Function
         End If
         ' Kahan 补偿求和 (与模块其他求和路径一致)
@@ -842,8 +858,8 @@ Public Function Rank( _
     Dim arrV As Variant
     Dim i As Long, lb As Long, n As Long, cnt As Long
 
-    If VarType(value) = vbBoolean Or Not IsNumeric(value) Then
-        Err.Raise ERR_INVALID_INPUT, "Rank", "需要至少一个有效数值。"
+    If IsEmpty(value) Or IsError(value) Or VarType(value) = vbBoolean Or Not IsNumeric(value) Then
+        Err.Raise ERR_INVALID_INPUT, "Rank", "value 参数必须为数值。"
         Exit Function
     End If
 
@@ -875,7 +891,7 @@ End Function
 '=============================================================================
 Public Function RankEq(ByRef data As Variant, ByRef value As Variant, _
     Optional ByVal ascending As Boolean = True, Optional ByVal colIndex As Long = 1) As Variant
-    Dim arrV As Variant: If VarType(value) = vbBoolean Or Not IsNumeric(value) Then Err.Raise ERR_INVALID_INPUT, "RankEq", "需要至少一个有效数值。": Exit Function
+    Dim arrV As Variant: If IsEmpty(value) Or IsError(value) Or VarType(value) = vbBoolean Or Not IsNumeric(value) Then Err.Raise ERR_INVALID_INPUT, "RankEq", "value 参数必须为数值。": Exit Function
     arrV = ExtractDoubles(data, colIndex)
     If UBound(arrV) - LBound(arrV) + 1 < 1 Then Err.Raise ERR_INVALID_INPUT, "RankEq", "需要至少一个有效数值。": Exit Function
     Dim arr() As Double, val As Double: arr = arrV: val = CDbl(value)
@@ -1352,7 +1368,10 @@ Public Function CorrelationMatrix(ByVal data As Variant, _
                         std2 = Sqr(ss2 / (nPair - 1))
                         result(c1 + 1, c2 + 1) = cov / ((nPair - 1) * std1 * std2)
                     Else
-                        result(c1 + 1, c2 + 1) = 0#
+                        ' R5-54: 零方差列相关系数无定义 — 报 ERR_DIV_BY_ZERO
+                        ' (对齐 Excel CORREL 的 #DIV/0! 与 numpy 的 nan)
+                        Err.Raise ERR_DIV_BY_ZERO, "CorrelationMatrix", _
+                            "列 " & colNames(colIdx1) & " 或 " & colNames(colIdx2) & " 方差为零。"
                     End If
                 End If
             End If
@@ -1963,7 +1982,11 @@ Public Function BetaReg(ByVal x As Double, ByVal a As Double, ByVal b As Double)
         Err.Raise ERR_INVALID_INPUT, "BetaReg", _
             "参数 a, b 必须为正数, 实际 a=" & a & ", b=" & b
     End If
-    If x < 0# Or x > 1# Then BetaReg = -1#: Exit Function
+    ' R5-55: x 越界与 a/b 校验一致报错, 不再返回 -1 哨兵
+    If x < 0# Or x > 1# Then
+        Err.Raise ERR_INVALID_INPUT, "BetaReg", _
+            "参数 x 必须在 [0, 1] 之间, 实际 x=" & x
+    End If
     If x = 0# Then BetaReg = 0#: Exit Function
     If x = 1# Then BetaReg = 1#: Exit Function
 
@@ -2128,62 +2151,75 @@ End Sub
 
 
 '=============================================================================
+' UdfErr — UDF 错误码映射 (R5-20): 核心 Err.Number → Excel 错误值
+' 与模块头错误约定一致; 缺省 xlErrValue
+'=============================================================================
+Private Function UdfErr(ByVal errNum As Long) As Variant
+    Select Case errNum
+        Case ERR_DIV_BY_ZERO: UdfErr = CVErr(xlErrDiv0)
+        Case ERR_NOT_AVAIL:   UdfErr = CVErr(xlErrNA)
+        Case ERR_NUM_DOMAIN:  UdfErr = CVErr(xlErrNum)
+        Case Else:            UdfErr = CVErr(xlErrValue)
+    End Select
+End Function
+
+'=============================================================================
 ' 工作表函数 (UDF_STAT_*) — 遵循 UDF_<模块简称>_<函数名> 命名规范
 '=============================================================================
 
 Public Function UDF_STAT_MEAN(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_MEAN = Mean(data, colIndex): Exit Function
-EH: UDF_STAT_MEAN = CVErr(xlErrValue)
+EH: UDF_STAT_MEAN = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_MEDIAN(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_MEDIAN = Median(data, colIndex): Exit Function
-EH: UDF_STAT_MEDIAN = CVErr(xlErrValue)
+EH: UDF_STAT_MEDIAN = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_STDEV(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_STDEV = StdDev(data, colIndex): Exit Function
-EH: UDF_STAT_STDEV = CVErr(xlErrValue)
+EH: UDF_STAT_STDEV = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_STDEVP(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_STDEVP = StdDevP(data, colIndex): Exit Function
-EH: UDF_STAT_STDEVP = CVErr(xlErrValue)
+EH: UDF_STAT_STDEVP = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_VAR(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_VAR = Variance(data, colIndex): Exit Function
-EH: UDF_STAT_VAR = CVErr(xlErrValue)
+EH: UDF_STAT_VAR = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_VARP(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_VARP = VarianceP(data, colIndex): Exit Function
-EH: UDF_STAT_VARP = CVErr(xlErrValue)
+EH: UDF_STAT_VARP = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_PERCENTILE(ByVal data As Variant, ByVal k As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_PERCENTILE = Percentile(data, k, colIndex): Exit Function
-EH: UDF_STAT_PERCENTILE = CVErr(xlErrValue)
+EH: UDF_STAT_PERCENTILE = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_IQR(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_IQR = IQR(data, colIndex): Exit Function
-EH: UDF_STAT_IQR = CVErr(xlErrValue)
+EH: UDF_STAT_IQR = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_SKEW(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_SKEW = Skewness(data, colIndex): Exit Function
-EH: UDF_STAT_SKEW = CVErr(xlErrValue)
+EH: UDF_STAT_SKEW = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_KURTOSIS(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_KURTOSIS = Kurtosis(data, colIndex): Exit Function
-EH: UDF_STAT_KURTOSIS = CVErr(xlErrValue)
+EH: UDF_STAT_KURTOSIS = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_MODE(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_MODE = Mode(data, colIndex): Exit Function
-EH: UDF_STAT_MODE = CVErr(xlErrValue)
+EH: UDF_STAT_MODE = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_MINMAX(ByVal data As Variant, _
@@ -2194,125 +2230,125 @@ Public Function UDF_STAT_MINMAX(ByVal data As Variant, _
     Dim mn As Double, mx As Double
     UDF_STAT_MINMAX = MinMax(data, mn, mx, colIndex)
     Exit Function
-EH: UDF_STAT_MINMAX = CVErr(xlErrValue)
+EH: UDF_STAT_MINMAX = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_COV(ByVal dataX As Variant, ByVal dataY As Variant, _
     Optional ByVal colX As Variant = 1, Optional ByVal colY As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_COV = Covariance(dataX, dataY, colX, colY): Exit Function
-EH: UDF_STAT_COV = CVErr(xlErrValue)
+EH: UDF_STAT_COV = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_CORREL(ByVal dataX As Variant, ByVal dataY As Variant, _
     Optional ByVal colX As Variant = 1, Optional ByVal colY As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_CORREL = Correlation(dataX, dataY, colX, colY): Exit Function
-EH: UDF_STAT_CORREL = CVErr(xlErrValue)
+EH: UDF_STAT_CORREL = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_ZSCORE(ByVal data As Variant, _
     Optional ByVal value As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_ZSCORE = ZScore(data, value, colIndex): Exit Function
-EH: UDF_STAT_ZSCORE = CVErr(xlErrValue)
+EH: UDF_STAT_ZSCORE = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_NORMALIZE(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_NORMALIZE = Normalize(data, colIndex): Exit Function
-EH: UDF_STAT_NORMALIZE = CVErr(xlErrValue)
+EH: UDF_STAT_NORMALIZE = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_LININTERP(ByVal x As Variant, ByVal xs As Variant, ByVal ys As Variant) As Variant
     On Error GoTo EH:     UDF_STAT_LININTERP = LinInterp(x, xs, ys): Exit Function
-EH: UDF_STAT_LININTERP = CVErr(xlErrValue)
+EH: UDF_STAT_LININTERP = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_GEOMEAN(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_GEOMEAN = GeometricMean(data, colIndex): Exit Function
-EH: UDF_STAT_GEOMEAN = CVErr(xlErrValue)
+EH: UDF_STAT_GEOMEAN = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_RANKEQ(ByVal data As Variant, ByVal value As Variant, _
     Optional ByVal ascending As Variant = True, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_RANKEQ = RankEq(data, value, ascending, colIndex): Exit Function
-EH: UDF_STAT_RANKEQ = CVErr(xlErrValue)
+EH: UDF_STAT_RANKEQ = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_RANKAVG(ByVal data As Variant, ByVal value As Variant, _
     Optional ByVal ascending As Variant = True, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_RANKAVG = RankAvg(data, value, ascending, colIndex): Exit Function
-EH: UDF_STAT_RANKAVG = CVErr(xlErrValue)
+EH: UDF_STAT_RANKAVG = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_HARMEAN(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_HARMEAN = HarmonicMean(data, colIndex): Exit Function
-EH: UDF_STAT_HARMEAN = CVErr(xlErrValue)
+EH: UDF_STAT_HARMEAN = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_TRIMEAN(ByVal data As Variant, _
     Optional ByVal trimPct As Variant = 0.1, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_TRIMEAN = TrimMean(data, trimPct, colIndex): Exit Function
-EH: UDF_STAT_TRIMEAN = CVErr(xlErrValue)
+EH: UDF_STAT_TRIMEAN = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_RMS(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_RMS = RootMeanSquare(data, colIndex): Exit Function
-EH: UDF_STAT_RMS = CVErr(xlErrValue)
+EH: UDF_STAT_RMS = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_MAD(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_MAD = MeanAbsDev(data, colIndex): Exit Function
-EH: UDF_STAT_MAD = CVErr(xlErrValue)
+EH: UDF_STAT_MAD = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_SE(ByVal data As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_SE = StandardError(data, colIndex): Exit Function
-EH: UDF_STAT_SE = CVErr(xlErrValue)
+EH: UDF_STAT_SE = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_R2(ByVal actual As Variant, ByVal predicted As Variant, _
     Optional ByVal colActual As Variant = 1, Optional ByVal colPredicted As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_R2 = RSquare(actual, predicted, colActual, colPredicted): Exit Function
-EH: UDF_STAT_R2 = CVErr(xlErrValue)
+EH: UDF_STAT_R2 = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_RANK(ByVal data As Variant, ByVal value As Variant, _
     Optional ByVal ascending As Variant = True, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_RANK = Rank(data, value, ascending, colIndex): Exit Function
-EH: UDF_STAT_RANK = CVErr(xlErrValue)
+EH: UDF_STAT_RANK = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_PERCENTRANK(ByVal data As Variant, ByVal value As Variant, _
     Optional ByVal ascending As Variant = True, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_PERCENTRANK = PercentRank(data, value, ascending, colIndex): Exit Function
-EH: UDF_STAT_PERCENTRANK = CVErr(xlErrValue)
+EH: UDF_STAT_PERCENTRANK = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_WINSORIZE(ByVal data As Variant, _
     Optional ByVal pct As Variant = 0.05, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_WINSORIZE = Winsorize(data, pct, colIndex): Exit Function
-EH: UDF_STAT_WINSORIZE = CVErr(xlErrValue)
+EH: UDF_STAT_WINSORIZE = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_MA(ByVal data As Variant, ByVal window As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH:     UDF_STAT_MA = MovingAverage(data, window, colIndex): Exit Function
-EH: UDF_STAT_MA = CVErr(xlErrValue)
+EH: UDF_STAT_MA = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_WMEAN(ByVal values As Variant, ByVal weights As Variant, _
     Optional ByVal colIdxV As Variant = 1, Optional ByVal colIdxW As Variant = 1) As Variant
     On Error GoTo EH: UDF_STAT_WMEAN = WeightedMean(values, weights, colIdxV, colIdxW): Exit Function
-EH: UDF_STAT_WMEAN = CVErr(xlErrValue)
+EH: UDF_STAT_WMEAN = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_ZTEST(ByVal data As Variant, ByVal mu0 As Variant, _
     ByVal sigma As Variant, Optional ByVal colIndex As Variant = 1) As Variant
     On Error GoTo EH: UDF_STAT_ZTEST = ZTest(data, mu0, sigma, colIndex): Exit Function
-EH: UDF_STAT_ZTEST = CVErr(xlErrValue)
+EH: UDF_STAT_ZTEST = UdfErr(Err.Number)
 End Function
 
 Public Function UDF_STAT_TTEST(ByVal data1 As Variant, ByVal data2 As Variant, _
     Optional ByVal testType As Variant = 2, Optional ByVal colIdx1 As Variant = 1, Optional ByVal colIdx2 As Variant = 1) As Variant
     On Error GoTo EH: UDF_STAT_TTEST = TTest(data1, data2, testType, colIdx1, colIdx2): Exit Function
-EH: UDF_STAT_TTEST = CVErr(xlErrValue)
+EH: UDF_STAT_TTEST = UdfErr(Err.Number)
 End Function
 
 '=====================================================================

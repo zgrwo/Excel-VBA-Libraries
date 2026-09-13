@@ -17,7 +17,8 @@ MODULE_PATHS = [os.path.join(VBA_CORE_DIR, name + ".cls")
 MODULE_PATHS.append(os.path.join(SRC_DIR, "RegexUtils.bas"))
 
 
-# 2026-09-13 R4-03/R4-06 回归: 错误值不得字符串化; 1D Variant 数组路径
+# 2026-09-13 R4-03/R4-06/R5-19 回归: 错误值不得字符串化; 1D Variant 数组路径;
+# RegExp Static 缓存连续 pattern/flags 切换不串状态
 def _regex_r4_probe(excel, wb, ws, runner, tc, args):
     """注入专用 VBA 探针 (在 VBA 内捕获错误, 避免错误变体跨 COM)。"""
     from tests.test_utils import run_macro
@@ -32,6 +33,8 @@ def _regex_r4_probe(excel, wb, ws, runner, tc, args):
         "Public Function Probe(ByVal which As String) As Double\r\n"
         "    On Error GoTo EH\r\n"
         "    Dim v As Variant\r\n"
+        "    Dim n As Long\r\n"
+        "    Dim errNum As Long\r\n"
         "    If which = \"count_1d\" Then\r\n"
         "        v = RegexCount(Array(\"a1\", \"b2\"), \"\\d+\")\r\n"
         "        Probe = CDbl(v)\r\n"
@@ -48,6 +51,43 @@ def _regex_r4_probe(excel, wb, ws, runner, tc, args):
         "        v = UDF_REGEX_ISMATCH(CVErr(2007), \"\\d+\")\r\n"
         "        If IsError(v) Then Probe = 1 Else Probe = 0\r\n"
         "        Exit Function\r\n"
+        "    ElseIf which = \"cache_switch\" Then\r\n"
+        "        If RegexIsMatch(\"ABC\", \"abc\", True) Then n = n + 1\r\n"
+        "        If Not RegexIsMatch(\"ABC\", \"abc\", False) Then n = n + 2\r\n"
+        "        If RegexIsMatch(\"a\" & vbLf & \"b\", \"^b$\", True, True) Then n = n + 4\r\n"
+        "        If Not RegexIsMatch(\"a\" & vbLf & \"b\", \"^b$\", True, False) Then n = n + 8\r\n"
+        "        If RegexIsMatch(\"ABC\", \"abc\", True) Then n = n + 16\r\n"
+        "        v = RegexExtractGroups(\"x=1;y=2\", \"(\\w)=(\\d)\", True, True)\r\n"
+        "        If UBound(v, 1) = 1 Then\r\n"
+        "            If v(1, 0) = \"y\" Then n = n + 32\r\n"
+        "        End If\r\n"
+        "        If Not RegexIsMatch(\"ABC\", \"abc\", False) Then n = n + 64\r\n"
+        "        If RegexIsFullMatch(\"1\", \"\\d\", True, True) Then n = n + 128\r\n"
+        "        v = RegexExtract(\"a1b2\", \"\\d\", 0, True, True)\r\n"
+        "        If CStr(v) = \"1, 2\" Then n = n + 256\r\n"
+        "        v = RegexReplace(\"a1b2\", \"\\d\", \"X\", -1)\r\n"
+        "        If CStr(v) = \"a1bX\" Then n = n + 512\r\n"
+        "        v = RegexExtract(\"a1b2\", \"\\d\", 0, True, True)\r\n"
+        "        If CStr(v) = \"1, 2\" Then n = n + 1024\r\n"
+        "        Probe = CDbl(n)\r\n"
+        "        Exit Function\r\n"
+        "    ElseIf which = \"cache_after_error\" Then\r\n"
+        "        On Error Resume Next\r\n"
+        "        v = RegexIsMatch(\"abc\", \"abc\", True)\r\n"
+        "        errNum = Err.Number\r\n"
+        "        Err.Clear\r\n"
+        "        If errNum = 0 Then\r\n"
+        "            v = RegexIsMatch(\"abc\", \"[\")\r\n"
+        "            errNum = Err.Number\r\n"
+        "            Err.Clear\r\n"
+        "        End If\r\n"
+        "        On Error GoTo EH\r\n"
+        "        If errNum = 0 Then\r\n"
+        "            Probe = -2\r\n"
+        "        ElseIf RegexIsMatch(\"ABC\", \"abc\", True) Then\r\n"
+        "            Probe = 1\r\n"
+        "        End If\r\n"
+        "        Exit Function\r\n"
         "    End If\r\n"
         "    Probe = -1\r\n"
         "    Exit Function\r\n"
@@ -57,7 +97,8 @@ def _regex_r4_probe(excel, wb, ws, runner, tc, args):
     mode = args[0]
     val = run_macro(excel, wb, "RegexR4Probe.Probe", mode)
     expected = {"count_1d": 2.0, "udf_count_1d": 2.0,
-                "err_count": 1.0, "err_udf": 1.0}[mode]
+                "err_count": 1.0, "err_udf": 1.0,
+                "cache_switch": 2047.0, "cache_after_error": 1.0}[mode]
     return float(val), expected, 0.0
 
 # =============================================================================
@@ -382,6 +423,17 @@ TEST_CASES = [
      "py_ref": lambda a: 1.0},
     {"name": "UDF_ISMATCH_error_scalar", "func": "UDF_REGEX_ISMATCH",
      "args": lambda: ("err_udf",), "reconstruct": _regex_r4_probe,
+     "py_ref": lambda a: 1.0},
+
+    # =====================================================================
+    # 2026-09-13 R5-19 回归: RegExp Static 缓存 — 连续 pattern/flags 切换
+    # (IgnoreCase/MultiLine/Global 不串状态), 非法模式不污染缓存
+    # =====================================================================
+    {"name": "Regex_cache_pattern_switch", "func": "RegexIsMatch",
+     "args": lambda: ("cache_switch",), "reconstruct": _regex_r4_probe,
+     "py_ref": lambda a: 2047.0},
+    {"name": "Regex_cache_survives_invalid_pattern", "func": "RegexIsMatch",
+     "args": lambda: ("cache_after_error",), "reconstruct": _regex_r4_probe,
      "py_ref": lambda a: 1.0},
 
 ]

@@ -1442,6 +1442,190 @@ TEST_CASES += [
 ]
 
 
+# =============================================================================
+# R5 probes (0 FAIL 约束: 错误/Empty/数组字面量必须在 VBA 内部构造与检查)
+# =============================================================================
+
+STR_R5_PROBE_VBA = r"""
+Option Explicit
+
+Public Function ProbeR5(ByVal which As String) As Variant
+    On Error GoTo EH
+
+    Dim v As Variant
+
+    ' ---- R5-01: UDF 标量路径错误值 → CVErr(xlErrValue) (返回 1 = IsError) ----
+    If which = "err_reversestring" Then
+        v = UDF_STR_REVERSESTRING(CVErr(xlErrDiv0))
+    ElseIf which = "err_totitlecase" Then
+        v = UDF_STR_TOTITLECASE(CVErr(xlErrDiv0))
+    ElseIf which = "err_isemail" Then
+        v = UDF_STR_ISEMAIL(CVErr(xlErrDiv0))
+    ElseIf which = "err_removechars" Then
+        v = UDF_STR_REMOVECHARS(CVErr(xlErrDiv0), "-")
+    ElseIf which = "err_truncate" Then
+        v = UDF_STR_TRUNCATE(CVErr(xlErrDiv0), 5)
+    ElseIf which = "err_countsubstring" Then
+        v = UDF_STR_COUNTSUBSTRING(CVErr(xlErrDiv0), "a")
+    ElseIf which = "err_padleft" Then
+        v = UDF_STR_PADLEFT(CVErr(xlErrDiv0), 5)
+    ElseIf which = "err_base64encode" Then
+        v = UDF_STR_BASE64ENCODE(CVErr(xlErrDiv0))
+    ElseIf which = "err_soundex" Then
+        v = UDF_STR_SOUNDEX(CVErr(xlErrDiv0))
+    ElseIf which = "err_urlencode" Then
+        v = UDF_STR_URLENCODE(CVErr(xlErrDiv0))
+
+    ' ---- R5-11: 1D Variant 数组 → 1×n 2D 结果 ----
+    ' 注: 1D 提升后第二维保持原 1D 数组的 LBound (通常为 0), 不能假定 1..n
+    ElseIf which = "1d_isnullempty" Then
+        v = UDF_STR_ISNULLOREMPTY(Array("", "x", Empty))
+        If Not IsArray(v) Then ProbeR5 = "NOT_ARRAY": Exit Function
+        If UBound(v, 1) <> 1 Or (UBound(v, 2) - LBound(v, 2) + 1) <> 3 Then ProbeR5 = "BAD_SHAPE": Exit Function
+        ProbeR5 = CStr(v(1, LBound(v, 2))) & "|" & CStr(v(1, LBound(v, 2) + 1)) & "|" & CStr(v(1, LBound(v, 2) + 2))
+        Exit Function
+    ElseIf which = "1d_isnullwhitespace" Then
+        v = UDF_STR_ISNULLORWHITESPACE(Array("  ", "x", vbTab))
+        If Not IsArray(v) Then ProbeR5 = "NOT_ARRAY": Exit Function
+        If UBound(v, 1) <> 1 Or (UBound(v, 2) - LBound(v, 2) + 1) <> 3 Then ProbeR5 = "BAD_SHAPE": Exit Function
+        ProbeR5 = CStr(v(1, LBound(v, 2))) & "|" & CStr(v(1, LBound(v, 2) + 1)) & "|" & CStr(v(1, LBound(v, 2) + 2))
+        Exit Function
+    ElseIf which = "1d_commonprefix" Then
+        v = UDF_STR_COMMONPREFIX(Array("flower", "fleet"), "fl")
+        If Not IsArray(v) Then ProbeR5 = "NOT_ARRAY": Exit Function
+        ProbeR5 = CStr(UBound(v, 1)) & "x" & CStr(UBound(v, 2) - LBound(v, 2) + 1) & ":" & _
+                  CStr(v(1, LBound(v, 2))) & "," & CStr(v(1, LBound(v, 2) + 1))
+        Exit Function
+    ElseIf which = "1d_levenshtein" Then
+        v = UDF_STR_LEVENSHTEIN(Array("kitten", "sitting"), "sitting")
+        If Not IsArray(v) Then ProbeR5 = "NOT_ARRAY": Exit Function
+        ProbeR5 = CStr(UBound(v, 1)) & "x" & CStr(UBound(v, 2) - LBound(v, 2) + 1) & ":" & _
+                  CStr(v(1, LBound(v, 2))) & "," & CStr(v(1, LBound(v, 2) + 1))
+        Exit Function
+    ElseIf which = "1d_base64decode" Then
+        v = UDF_STR_BASE64DECODE(Array("SGVsbG8=", "V29ybGQ="))
+        If Not IsArray(v) Then ProbeR5 = "NOT_ARRAY": Exit Function
+        ProbeR5 = CStr(UBound(v, 1)) & "x" & CStr(UBound(v, 2) - LBound(v, 2) + 1) & ":" & _
+                  CStr(v(1, LBound(v, 2))) & "," & CStr(v(1, LBound(v, 2) + 1))
+        Exit Function
+    ElseIf which = "1d_randomstring" Then
+        ' 注意: 输出随机, 仅验证数组形状/不接受 CVErr
+        v = UDF_STR_RANDOMSTRING(8, Array("abc", "xyz"))
+        If IsError(v) Then ProbeR5 = "ERR": Exit Function
+        If Not IsArray(v) Then ProbeR5 = "NOT_ARRAY": Exit Function
+        ProbeR5 = CStr(UBound(v, 1)) & "x" & CStr(UBound(v, 2) - LBound(v, 2) + 1)
+        Exit Function
+    Else
+        ProbeR5 = "UNKNOWN"
+        Exit Function
+    End If
+
+    ' R5-01 分支: 1 = CVErr(xlErrValue), 0 = 其它
+    If IsError(v) Then ProbeR5 = 1 Else ProbeR5 = 0
+    Exit Function
+EH:
+    ProbeR5 = "RAISE:" & CStr(Err.Number)
+End Function
+"""
+
+
+def _str_r5_probe(excel, wb, ws, runner, tc, args):
+    """R5-01/R5-11 探针: 在 VBA 内部构造 CVErr/Array/Empty, 结果不穿透 COM。"""
+    from tests.test_utils import run_macro
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == "StrR5Probe":
+            vbproj.VBComponents.Remove(comp)
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = "StrR5Probe"
+    comp.CodeModule.AddFromString(
+        STR_R5_PROBE_VBA.replace("\r\n", "\n").replace("\n", "\r\n"))
+    val = run_macro(excel, wb, "StrR5Probe.ProbeR5", args[0])
+    expected = tc["py_ref"](args) if callable(tc["py_ref"]) else tc["py_ref"]
+    return val, expected, float(tc.get("tol", 0.0))
+
+
+# =====================================================================
+# 第五轮审查回归 (2026-09-13): R5-01/R5-11/R5-13/R5-61
+# =====================================================================
+TEST_CASES += [
+    # ---- R5-01: 全部/代表 UDF 标量路径错误值 → #VALUE! ----
+    {"name": "R5_01_err_reversestring", "func": "UDF_STR_REVERSESTRING",
+     "args": lambda: ("err_reversestring",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: 1.0},
+    {"name": "R5_01_err_totitlecase", "func": "UDF_STR_TOTITLECASE",
+     "args": lambda: ("err_totitlecase",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: 1.0},
+    {"name": "R5_01_err_isemail", "func": "UDF_STR_ISEMAIL",
+     "args": lambda: ("err_isemail",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: 1.0},
+    {"name": "R5_01_err_removechars", "func": "UDF_STR_REMOVECHARS",
+     "args": lambda: ("err_removechars",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: 1.0},
+    {"name": "R5_01_err_truncate", "func": "UDF_STR_TRUNCATE",
+     "args": lambda: ("err_truncate",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: 1.0},
+    {"name": "R5_01_err_countsubstring", "func": "UDF_STR_COUNTSUBSTRING",
+     "args": lambda: ("err_countsubstring",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: 1.0},
+    {"name": "R5_01_err_padleft", "func": "UDF_STR_PADLEFT",
+     "args": lambda: ("err_padleft",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: 1.0},
+    {"name": "R5_01_err_base64encode", "func": "UDF_STR_BASE64ENCODE",
+     "args": lambda: ("err_base64encode",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: 1.0},
+    {"name": "R5_01_err_soundex", "func": "UDF_STR_SOUNDEX",
+     "args": lambda: ("err_soundex",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: 1.0},
+    {"name": "R5_01_err_urlencode", "func": "UDF_STR_URLENCODE",
+     "args": lambda: ("err_urlencode",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: 1.0},
+
+    # ---- R5-11: 1D Variant 数组 → 2D 1×n (谓词逐元素 Boolean) ----
+    {"name": "R5_11_1d_isnullempty", "func": "UDF_STR_ISNULLOREMPTY",
+     "args": lambda: ("1d_isnullempty",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: "True|False|True", "result_type": "string"},
+    {"name": "R5_11_1d_isnullwhitespace", "func": "UDF_STR_ISNULLORWHITESPACE",
+     "args": lambda: ("1d_isnullwhitespace",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: "True|False|True", "result_type": "string"},
+    {"name": "R5_11_1d_commonprefix", "func": "UDF_STR_COMMONPREFIX",
+     "args": lambda: ("1d_commonprefix",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: "1x2:fl,fl", "result_type": "string"},
+    {"name": "R5_11_1d_levenshtein", "func": "UDF_STR_LEVENSHTEIN",
+     "args": lambda: ("1d_levenshtein",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: "1x2:3,0", "result_type": "string"},
+    {"name": "R5_11_1d_base64decode", "func": "UDF_STR_BASE64DECODE",
+     "args": lambda: ("1d_base64decode",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: "1x2:Hello,World", "result_type": "string"},
+    # R5-11 补齐: UDF_STR_RANDOMSTRING 1D charset → 2D 1×n (输出随机, 仅验证形状)
+    {"name": "R5_11_1d_randomstring", "func": "UDF_STR_RANDOMSTRING",
+     "args": lambda: ("1d_randomstring",), "reconstruct": _str_r5_probe,
+     "py_ref": lambda a: "1x2", "result_type": "string"},
+
+    # ---- R5-13: Mac 前缀例外清单 (machine/machinery/macy 不再 MacXxx) ----
+    {"name": "R5_13_machine", "func": "ToTitleCase",
+     "args": lambda: ("machine",), "py_ref": lambda a: "Machine",
+     "result_type": "string"},
+    {"name": "R5_13_machinery", "func": "ToTitleCase",
+     "args": lambda: ("machinery",), "py_ref": lambda a: "Machinery",
+     "result_type": "string"},
+    {"name": "R5_13_macdonald_mixed", "func": "ToTitleCase",
+     "args": lambda: ("macDonald",), "py_ref": lambda a: "MacDonald",
+     "result_type": "string"},
+    {"name": "R5_13_macy", "func": "ToTitleCase",
+     "args": lambda: ("macy",), "py_ref": lambda a: "Macy",
+     "result_type": "string"},
+
+    # ---- R5-61: Extended-B Ș/ș/Ț/ț 映射 + URLDecode 字面非 ASCII ----
+    {"name": "R5_61_remove_diacritics_0218_021b", "func": "RemoveDiacritics",
+     "args": lambda: ("ȘșȚț",), "py_ref": lambda a: "SsTt",
+     "result_type": "string"},
+    {"name": "R5_61_url_decode_literal_cafe", "func": "URLDecode",
+     "args": lambda: ("café",), "py_ref": lambda a: "café",
+     "result_type": "string"},
+]
+
+
 def main() -> int:
     runner = CrossValRunner("StringUtils", MODULE_PATHS)
     runner.run_all(TEST_CASES)

@@ -345,6 +345,49 @@ TEST_CASES += [
 ]
 
 
+# 2026-09-13 回归: R5-49 空输入错误码 / R5-50 colNames=Empty auto-detect
+def _xml_err_probe(excel, wb, ws, runner, tc, args):
+    """VBA 探针: 在 VBA 内部捕获错误码并返回值 (COM 不传递 VBA 错误描述)."""
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == "XmlProbe":
+            vbproj.VBComponents.Remove(comp)
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = "XmlProbe"
+    comp.CodeModule.AddFromString(
+        "Public Function ProbeErr(ByVal which As String) As Double\r\n"
+        "    On Error GoTo EH\r\n"
+        "    Dim v As Variant\r\n"
+        "    If which = \"empty\" Then\r\n"
+        "        v = XmlGet(\"\", \"/a\")\r\n"
+        "        ProbeErr = 0\r\n"
+        "        Exit Function\r\n"
+        "    ElseIf which = \"empty_cols\" Then\r\n"
+        "        v = XmlToRange(\"<rows><row><a>1</a><b>10</b></row></rows>\", \"/rows/row\", Empty)\r\n"
+        "        ProbeErr = CDbl(v(1, 2))\r\n"
+        "        Exit Function\r\n"
+        "    End If\r\n"
+        "    ProbeErr = 0\r\n"
+        "    Exit Function\r\n"
+        "EH: ProbeErr = Err.Number\r\n"
+        "End Function")
+    from tests.test_utils import run_macro
+    err_num = run_macro(excel, wb, "XmlProbe.ProbeErr", args[0])
+    return float(err_num), float(args[1]), 0.0
+
+
+TEST_CASES += [
+    # R5-49: 空输入必须抛 ERR_XML_EMPTY (vbObjectError + 1401 = -2147220103)
+    {"name": "XmlGet_empty_raises", "func": "XmlGet",
+     "args": lambda: ("empty", -2147220103.0),
+     "reconstruct": _xml_err_probe, "py_ref": lambda a: -2147220103.0},
+    # R5-50: colNames=Empty 必须走 auto-detect, 不再输出空白列
+    {"name": "XmlToRange_empty_colnames", "func": "XmlToRange",
+     "args": lambda: ("empty_cols", 10.0),
+     "reconstruct": _xml_err_probe, "py_ref": lambda a: 10.0},
+]
+
+
 def main() -> int:
     runner = CrossValRunner("XmlUtils", MODULE_PATHS)
     runner.run_all(TEST_CASES)

@@ -82,6 +82,43 @@ TEST_CASES = [
     # ---- StatsUtils UDF ----
     ("UDF_STAT_MEAN", [[1.0], [2.0], [3.0], [4.0], [5.0]],
      "=UDF_STAT_MEAN(A1:A5)", 3.0, 1e-6),
+    # R5-02/R5-30: 错误值必须映射为 CVErr(xlErrValue)=#VALUE! (ERROR.TYPE=3)
+    ("UDF_STAT_MEAN_errmap", None,
+     "=ERROR.TYPE(UDF_STAT_MEAN(1/0))", 3.0, 0),
+
+    # ---- RegressUtils UDFs (R5-25/R5-30 Range path) ----
+    # UDF_REGRESS_IMPORTANCE: 2 因子, Y = 1 + X1 + 5*X2 → 最重要因子 X2
+    # 数据 A1:C6; 因子列索引 D1:D2 = 1,2; 公式置于 G1
+    ("UDF_REGRESS_IMPORTANCE_top_factor",
+     [["X1", "X2", "Y", 1, ""],
+      [1, 1, 7, 2, ""],
+      [2, 1, 8, "", ""],
+      [3, 2, 14, "", ""],
+      [4, 1, 10, "", ""],
+      [5, 3, 21, "", ""]],
+     "=INDEX(UDF_REGRESS_IMPORTANCE(A1:C6,D1:D2,3),2,2)", "X2", 0,
+     False, "", (1, 7)),
+
+    # UDF_REGRESS_ANOVA: 摘要文本必须以 "F(" 开头
+    ("UDF_REGRESS_ANOVA_summary",
+     [["Group", "Value"],
+      ["A", 2.0], ["A", 3.0], ["A", 1.0],
+      ["B", 7.0], ["B", 8.0], ["B", 9.0],
+      ["C", 15.0], ["C", 14.0], ["C", 16.0]],
+     "=LEFT(UDF_REGRESS_ANOVA(A1:B10,1,2),2)", "F(", 0,
+     False, "", (1, 4)),
+
+    # UDF_REGRESS_PREDICT: Y = 1 + X1 + 5*X2, 预测点 (4,5) → 30
+    # 数据 A1:C6; factorCols E1:E2 = 1,2; newVals D1:D2 = 4,5; 公式 G1
+    ("UDF_REGRESS_PREDICT_range",
+     [["X1", "X2", "Y", 4, 1],
+      [1, 1, 7, 5, 2],
+      [2, 1, 8, "", ""],
+      [3, 2, 14, "", ""],
+      [4, 1, 10, "", ""],
+      [5, 3, 21, "", ""]],
+     "=UDF_REGRESS_PREDICT(A1:C6,E1:E2,3,D1:D2)", 30.0, 1e-6,
+     False, "", (1, 7)),
 ]
 
 
@@ -90,6 +127,7 @@ def run_test(xl, wb, test_case):
     name, data, formula, expected, tol = test_case[:5]
     skip = test_case[5] if len(test_case) > 5 else False
     skip_reason = test_case[6] if len(test_case) > 6 else ""
+    formula_pos = test_case[7] if len(test_case) > 7 else None
 
     if skip:
         return (name, True, f"SKIP: {skip_reason}", True)
@@ -103,8 +141,11 @@ def run_test(xl, wb, test_case):
                 for c in range(len(data[r])):
                     ws.Cells(r + 1, c + 1).Value = data[r][c]
 
-        # Place formula next to data
-        formula_cell = ws.Cells(1, 3)
+        # Place formula next to data (or at the explicit position when given)
+        if formula_pos is not None:
+            formula_cell = ws.Cells(formula_pos[0], formula_pos[1])
+        else:
+            formula_cell = ws.Cells(1, 3)
         formula_cell.Formula = formula
         xl.CalculateFull()
         actual = formula_cell.Value

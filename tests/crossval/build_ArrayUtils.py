@@ -18,6 +18,85 @@ MODULE_PATHS.append(os.path.join(SRC_DIR, "ArrayUtils.bas"))
 A2D = lambda rows: rows
 
 # =============================================================================
+# R5 regression probes (tests-only; source modules untouched)
+#
+# R5-12 (2026-09-13): unknown operators must raise ERR_INVALID_OP (mirror
+#   RangeUtils whitelist), not silently return empty/False.
+# R5-57 (2026-09-13): ArrayLookup on a 1D input must raise ERR_2D_REQUIRED
+#   (OERN previously swallowed the raise and mis-reported ERR_OUT_OF_BOUNDS).
+# =============================================================================
+
+VB_OBJECT_ERROR = -2147221504                # VBA vbObjectError
+ERR_2D_REQUIRED = VB_OBJECT_ERROR + 1002     # ArrayUtils.bas:96
+ERR_INVALID_OP = VB_OBJECT_ERROR + 1006      # ArrayUtils.bas:100
+
+_ARRAYUTILS_R5_PROBE = r"""
+Option Explicit
+
+Public Function Probe(ByVal which As String) As Double
+    Dim v As Variant, d As Variant
+    Dim a2(1 To 3, 1 To 2) As Variant
+    Dim n As Long
+    On Error GoTo EH
+
+    Select Case which
+        Case "filter_unknown_op"
+            v = Array(1, 2, 3)
+            d = ArrayFilterByValue(v, 2, "~~")
+            Probe = 0
+        Case "countif_unknown_op"
+            v = Array(1, 2, 3)
+            n = ArrayCountIf(v, 2, "~~")
+            Probe = 0
+        Case "any_unknown_op"
+            v = Array(1, 2, 3)
+            d = ArrayAny(v, 2, "~~")
+            Probe = 0
+        Case "all_unknown_op"
+            v = Array(1, 2, 3)
+            d = ArrayAll(v, 2, "~~")
+            Probe = 0
+        Case "lookup_1d"
+            v = Array(1, 2, 3)
+            d = ArrayLookup(v, 2, 1, 2, 0)
+            Probe = 0
+        Case "filter_known_op"
+            v = Array(1, 2, 3)
+            d = ArrayFilterByValue(v, 2, "=")
+            Probe = CDbl(UBound(d) - LBound(d) + 1)
+        Case "countif_known_op"
+            v = Array(1, 2, 3)
+            Probe = CDbl(ArrayCountIf(v, 2, ">="))
+        Case "lookup_2d_positive"
+            a2(1, 1) = 1: a2(1, 2) = 10
+            a2(2, 1) = 2: a2(2, 2) = 20
+            a2(3, 1) = 3: a2(3, 2) = 30
+            Probe = CDbl(ArrayLookup(a2, 2, 1, 2, 0))
+        Case Else
+            Probe = -1
+    End Select
+    Exit Function
+EH:
+    Probe = CDbl(Err.Number)
+End Function
+"""
+
+
+def _arrayutils_r5_probe(excel, wb, ws, runner, tc, args):
+    """R5-12/R5-57: inject a VBA-internal probe (errors never cross COM)."""
+    from tests.test_utils import run_macro
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == "ArrayUtilsR5Probe":
+            vbproj.VBComponents.Remove(comp)
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = "ArrayUtilsR5Probe"
+    comp.CodeModule.AddFromString(_ARRAYUTILS_R5_PROBE)
+    val = run_macro(excel, wb, "ArrayUtilsR5Probe.Probe", args[0])
+    expected = tc["py_ref"](args) if callable(tc.get("py_ref")) else tc.get("py_ref")
+    return float(val), float(expected), 0.0
+
+# =============================================================================
 # Test Cases
 # =============================================================================
 TEST_CASES = [
@@ -1349,6 +1428,34 @@ TEST_CASES += [
      "args": lambda: (7, 7), "py_ref": lambda a: 0.0, "tol": 0.0},
     {"name": "ArraySample_empty", "func": "ArraySample",
      "args": lambda: ([], 3), "py_ref": lambda a: [], "result_type": "array"},
+]
+
+# 2026-09-13 R5-12/R5-57 回归: 未知运算符白名单 + ArrayLookup 1D 错误码
+TEST_CASES += [
+    {"name": "R5-12_filter_unknown_op", "func": "ArrayFilterByValue",
+     "args": lambda: ("filter_unknown_op",), "reconstruct": _arrayutils_r5_probe,
+     "py_ref": lambda a: float(ERR_INVALID_OP)},
+    {"name": "R5-12_countif_unknown_op", "func": "ArrayCountIf",
+     "args": lambda: ("countif_unknown_op",), "reconstruct": _arrayutils_r5_probe,
+     "py_ref": lambda a: float(ERR_INVALID_OP)},
+    {"name": "R5-12_any_unknown_op", "func": "ArrayAny",
+     "args": lambda: ("any_unknown_op",), "reconstruct": _arrayutils_r5_probe,
+     "py_ref": lambda a: float(ERR_INVALID_OP)},
+    {"name": "R5-12_all_unknown_op", "func": "ArrayAll",
+     "args": lambda: ("all_unknown_op",), "reconstruct": _arrayutils_r5_probe,
+     "py_ref": lambda a: float(ERR_INVALID_OP)},
+    {"name": "R5-57_lookup_1d_2d_required", "func": "ArrayLookup",
+     "args": lambda: ("lookup_1d",), "reconstruct": _arrayutils_r5_probe,
+     "py_ref": lambda a: float(ERR_2D_REQUIRED)},
+    {"name": "R5-12_filter_known_op", "func": "ArrayFilterByValue",
+     "args": lambda: ("filter_known_op",), "reconstruct": _arrayutils_r5_probe,
+     "py_ref": lambda a: 1.0},
+    {"name": "R5-12_countif_known_op", "func": "ArrayCountIf",
+     "args": lambda: ("countif_known_op",), "reconstruct": _arrayutils_r5_probe,
+     "py_ref": lambda a: 2.0},
+    {"name": "R5-57_lookup_2d_positive", "func": "ArrayLookup",
+     "args": lambda: ("lookup_2d_positive",), "reconstruct": _arrayutils_r5_probe,
+     "py_ref": lambda a: 20.0},
 ]
 
 

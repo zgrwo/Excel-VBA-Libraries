@@ -27,6 +27,14 @@ MODULE_PATHS = [os.path.join(VBA_CORE_DIR, n + ".cls") for n in VBA_CORE_IMPORT_
 MODULE_PATHS.append(os.path.join(SRC_DIR, "LinearUtils.bas"))
 MODULE_PATHS.append(os.path.join(SRC_DIR, "SolveUtils.bas"))
 
+# VBA vbObjectError — SolveUtils module error codes are vbObjectError + 1601..1699
+_VB_OBJECT_ERROR = -2147221504
+ERR_SV_INVALID_INPUT = _VB_OBJECT_ERROR + 1601  # SolveUtils.bas:36
+ERR_SV_NO_VARIABLE = _VB_OBJECT_ERROR + 1602    # SolveUtils.bas:37
+ERR_SV_POLY_LIMIT = _VB_OBJECT_ERROR + 1606     # SolveUtils.bas:41
+ERR_SV_LIMIT = _VB_OBJECT_ERROR + 1607          # SolveUtils.bas:42
+ERR_SV_NONFINITE = _VB_OBJECT_ERROR + 1610      # SolveUtils.bas:45
+
 # =============================================================================
 # Independent fixtures — y = 2 + 0.5·IncomingA + 1.5·VariableU1
 # =============================================================================
@@ -213,45 +221,189 @@ def _equation_poly_probe(excel, wb, ws, runner, tc, args):
         return 0.0, 1.0, 0.0
 
 
-def _solve_error_probe(excel, wb, ws, runner, tc, args):
-    """R4-07: 限额/负例必须在 VBA 内部捕获错误 (错误不穿透 COM)。"""
-    from tests.test_utils import run_macro
+# =============================================================================
+# 2026-09-13 第五轮审查回归探针 (R5-29/40/41/42/43)
+# =============================================================================
+
+def _independent_request_no_role():
+    """R5-40: 独立 request 表无 Variable*/Output* 前缀列 (仅角色映射)。"""
+    return [["IncomingA", "OutputY1"], [10.0, 13.0]]
+
+
+def _independent_request_with_init():
+    """R5-29: 独立 request 表显式给出可调变量初值。"""
+    return [["IncomingA", "VariableU1", "OutputY1"], [10.0, 4.0, 13.0]]
+
+
+def _multi_output_table():
+    """R5-29: 多输出数据表 — Y1 = 2 + 5U, Y2 = -1 + 3U。"""
+    rows = [["VariableU1", "OutputY1", "OutputY2"]]
+    for i in range(1, 11):
+        rows.append([float(i), 2.0 + 5.0 * i, -1.0 + 3.0 * i])
+    return rows
+
+
+def _inverse_request_probe(field, request_factory):
+    """SolveInverse 数组路径 + 独立 request 表 (Python list → COM Variant)。"""
+    def probe(excel, wb, ws, runner, tc, args):
+        data = _linear_table(False)
+        res = run_macro(excel, wb, "SolveUtils.SolveInverse",
+                        data, request_factory(), [], "linear", 42, 10)
+        row = res[1]
+        if field == "rec":
+            return float(row[1]), 4.0, 1e-4
+        if field == "pred":
+            return float(row[2]), 13.0, 1e-6
+        if field == "status":
+            return (0.0 if str(row[4]) == "可达" else 1.0), 0.0, 0.0
+        raise ValueError(f"unknown field {field}")
+    return probe
+
+
+def _inverse_multi_output_probe(excel, wb, ws, runner, tc, args):
+    """R5-29: 多输出反解 — U=5 同时命中 Y1=27、Y2=14。"""
+    request = [["VariableU1", "OutputY1", "OutputY2"], [5.0, 27.0, 14.0]]
+    res = run_macro(excel, wb, "SolveUtils.SolveInverse",
+                    _multi_output_table(), request, [], "linear", 42, 10)
+    row = res[1]
+    dev = (abs(float(row[1]) - 5.0) + abs(float(row[2]) - 27.0)
+           + abs(float(row[3]) - 14.0))
+    return dev, 0.0, 1e-4
+
+
+def _quality_array_probe(excel, wb, ws, runner, tc, args):
+    """R5-29: SolveQuality Python-list 数组路径 (此前仅 SolvePredict 有)。"""
+    res = run_macro(excel, wb, "SolveUtils.SolveQuality",
+                    _linear_table(False), "linear", 42)
+    return float(res[1][3]), 1.0, 1e-9
+
+
+def _equation_array_probe(row_idx):
+    """R5-29: SolveEquation Python-list 数组路径。"""
+    def probe(excel, wb, ws, runner, tc, args):
+        res = run_macro(excel, wb, "SolveUtils.SolveEquation",
+                        _linear_table(False), "linear")
+        return str(res[row_idx][2]), tc["py_val"], 0.0
+    return probe
+
+
+def _g6_edge_probe(excel, wb, ws, runner, tc, args):
+    """R5-42: 999999.7 的 G6 文本必须是 1E+06 (经 SolveEquation 格式化)。"""
+    rows = [["VariableU1", "OutputY1"]]
+    for i in range(1, 7):
+        rows.append([float(i), 999999.7 + float(i)])
+    res = run_macro(excel, wb, "SolveUtils.SolveEquation", rows, "linear")
+    txt = str(res[1][2])
+    return (1.0 if "1E+06" in txt else 0.0), 1.0, 0.0
+
+
+_SOLVE_PROBE_CODE = "\r\n".join([
+    "Option Explicit",
+    "",
+    "Public Function ProbeErr(ByVal kind As String) As Double",
+    "    On Error GoTo EH",
+    "    Dim res As Variant",
+    "    Dim tbl As Variant",
+    "    Dim rr As Long, cc As Long",
+    "    If kind = \"no_variable\" Then",
+    "        ReDim tbl(1 To 3, 1 To 2)",
+    "        tbl(1, 1) = \"IncomingA\": tbl(1, 2) = \"OutputY1\"",
+    "        tbl(2, 1) = 1#: tbl(2, 2) = 10#",
+    "        tbl(3, 1) = 2#: tbl(3, 2) = 20#",
+    "        res = SolveInverse(tbl, Empty, Empty, \"linear\", 42, 10)",
+    "    ElseIf kind = \"too_many_outputs\" Then",
+    "        ReDim tbl(1 To 6, 1 To 18)",
+    "        tbl(1, 1) = \"VariableU1\"",
+    "        For cc = 2 To 18: tbl(1, cc) = \"Output\" & (cc - 1): Next cc",
+    "        For rr = 2 To 6",
+    "            tbl(rr, 1) = CDbl(rr)",
+    "            For cc = 2 To 18: tbl(rr, cc) = CDbl(rr * (cc - 1)): Next cc",
+    "        Next rr",
+    "        res = SolveInverse(tbl, Empty, Empty, \"linear\", 42, 10)",
+    "    ElseIf kind = \"poly_limit\" Then",
+    "        ReDim tbl(1 To 7, 1 To 14)",
+    "        For cc = 1 To 7: tbl(1, cc) = \"Incoming\" & cc: Next cc",
+    "        For cc = 8 To 10: tbl(1, cc) = \"Variable\" & cc: Next cc",
+    "        For cc = 11 To 13: tbl(1, cc) = \"Fixed\" & cc: Next cc",
+    "        tbl(1, 14) = \"OutputY1\"",
+    "        For rr = 2 To 7",
+    "            For cc = 1 To 13: tbl(rr, cc) = CDbl(rr) / 10#: Next cc",
+    "            tbl(rr, 14) = CDbl(rr)",
+    "        Next rr",
+    "        res = SolveEquation(tbl, \"poly\")",
+    "    ElseIf kind = \"nonfinite\" Then",
+    "        ReDim tbl(1 To 6, 1 To 2)",
+    "        tbl(1, 1) = \"VariableU1\": tbl(1, 2) = \"OutputY1\"",
+    "        For rr = 2 To 6",
+    "            tbl(rr, 1) = 1E+200 * CDbl(rr)",
+    "            tbl(rr, 2) = CDbl(rr)",
+    "        Next rr",
+    "        res = SolveEquation(tbl, \"poly\")",
+    "    End If",
+    "    ProbeErr = 0#",
+    "    Exit Function",
+    "EH:",
+    "    ProbeErr = CDbl(Err.Number)",
+    "End Function",
+    "",
+    "Public Function ProbeCoreInvalidOpt(ByVal data As Range, ByVal bad As Range) As Double",
+    "    On Error GoTo EH",
+    "    Dim res As Variant",
+    "    res = SolveInverse(data, bad, Empty, \"linear\", 42, 10)",
+    "    ProbeCoreInvalidOpt = 0#",
+    "    Exit Function",
+    "EH:",
+    "    ProbeCoreInvalidOpt = CDbl(Err.Number)",
+    "End Function",
+    "",
+    "Public Function ProbeUdfInvalidOpt(ByVal data As Range, ByVal bad As Range) As Double",
+    "    On Error GoTo EH",
+    "    Dim res As Variant",
+    "    res = UDF_SOLVE_INVERSE(data, bad)",
+    "    If IsError(res) Then",
+    "        ProbeUdfInvalidOpt = -1#",
+    "    Else",
+    "        ProbeUdfInvalidOpt = 0#",
+    "    End If",
+    "    Exit Function",
+    "EH:",
+    "    ProbeUdfInvalidOpt = 99#",
+    "End Function",
+])
+
+
+def _inject_solve_probe(wb):
+    """Inject SolveProbeR5 (idempotent); save so the injected macro is runnable."""
     vbproj = wb.VBProject
     for comp in list(vbproj.VBComponents):
-        if comp.Name == "SolveR4Probe":
-            vbproj.VBComponents.Remove(comp)
+        if comp.Name == "SolveProbeR5":
+            return
     comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
-    comp.Name = "SolveR4Probe"
-    comp.CodeModule.AddFromString(
-        "Option Explicit\r\n"
-        "Public Function ProbeMode(ByVal which As String) As Double\r\n"
-        "    On Error GoTo EH\r\n"
-        "    Dim v As Variant\r\n"
-        "    Dim r As Long, c As Long\r\n"
-        "    If which = \"no_variable\" Then\r\n"
-        "        Dim d1(1 To 3, 1 To 2) As Variant\r\n"
-        "        d1(1, 1) = \"IncomingA\": d1(1, 2) = \"OutputY1\"\r\n"
-        "        d1(2, 1) = 1#: d1(2, 2) = 10#\r\n"
-        "        d1(3, 1) = 2#: d1(3, 2) = 20#\r\n"
-        "        v = SolveInverse(d1, Empty, Empty, \"linear\", 42, 10)\r\n"
-        "    Else\r\n"
-        "        Dim d2(1 To 6, 1 To 18) As Variant\r\n"
-        "        d2(1, 1) = \"VariableU1\"\r\n"
-        "        For c = 2 To 18: d2(1, c) = \"Output\" & (c - 1): Next c\r\n"
-        "        For r = 2 To 6\r\n"
-        "            d2(r, 1) = CDbl(r)\r\n"
-        "            For c = 2 To 18: d2(r, c) = CDbl(r * (c - 1)): Next c\r\n"
-        "        Next r\r\n"
-        "        v = SolveInverse(d2, Empty, Empty, \"linear\", 42, 10)\r\n"
-        "    End If\r\n"
-        "    ProbeMode = 0\r\n"
-        "    Exit Function\r\n"
-        "EH:\r\n"
-        "    ProbeMode = 1\r\n"
-        "End Function")
+    comp.Name = "SolveProbeR5"
+    comp.CodeModule.AddFromString(_SOLVE_PROBE_CODE)
+    wb.Save()
+
+
+def _solve_error_probe(excel, wb, ws, runner, tc, args):
+    """R5-29: 在 VBA 内部捕获错误码并返回真实 Err.Number (非恒定 1)。"""
     mode = args[0]
-    val = run_macro(excel, wb, "SolveR4Probe.ProbeMode", mode)
-    return float(val), 1.0, 0.0
+    expected = float(args[1])
+    _inject_solve_probe(wb)
+    err = run_macro(excel, wb, "SolveProbeR5.ProbeErr", mode)
+    return float(err), expected, 0.0
+
+
+def _invalid_optional_probe(which):
+    """R5-43: 多区域 Range 作为可选表 — UDF 返回 CVErr, 核心抛模块错误。"""
+    def probe(excel, wb, ws, runner, tc, args):
+        data_rng = _write_table(ws, _linear_table(False))
+        second = ws.Range(ws.Cells(15, 1), ws.Cells(16, 2))
+        bad = excel.Union(ws.Range("A1:B2"), second)
+        macro = ("SolveProbeR5.ProbeUdfInvalidOpt" if which == "udf"
+                 else "SolveProbeR5.ProbeCoreInvalidOpt")
+        val = run_macro(excel, wb, macro, data_rng, bad)
+        return float(val), float(tc["py_val"]), 0.0
+    return probe
 
 
 # =============================================================================
@@ -319,13 +471,62 @@ TEST_CASES = [
     # R4-01: 90 项 poly 方程 (缓冲由 POLY_TERM_LIMIT 派生)
     {"name": "Equation_Poly_90Terms", "func": "UDF_SOLVE_EQUATION",
      "args": lambda: (), "reconstruct": _equation_poly_probe, "py_ref": lambda a: 1.0},
-    # R4-07: 限额/负例路径 (VBA 内捕获错误)
+    # R4-07: 限额/负例路径 (VBA 内捕获错误, 断言具体错误码)
     {"name": "Inverse_NoVariable_Raises", "func": "SolveInverse",
-     "args": lambda: ("no_variable",), "reconstruct": _solve_error_probe,
-     "py_ref": lambda a: 1.0},
+     "args": lambda: ("no_variable", ERR_SV_NO_VARIABLE), "reconstruct": _solve_error_probe,
+     "py_ref": lambda a: float(ERR_SV_NO_VARIABLE)},
     {"name": "Inverse_TooManyOutputs_Raises", "func": "SolveInverse",
-     "args": lambda: ("too_many_outputs",), "reconstruct": _solve_error_probe,
+     "args": lambda: ("too_many_outputs", ERR_SV_LIMIT), "reconstruct": _solve_error_probe,
+     "py_ref": lambda a: float(ERR_SV_LIMIT)},
+    {"name": "Equation_PolyLimit_Raises", "func": "SolveEquation",
+     "args": lambda: ("poly_limit", ERR_SV_POLY_LIMIT), "reconstruct": _solve_error_probe,
+     "py_ref": lambda a: float(ERR_SV_POLY_LIMIT)},
+
+    # =====================================================================
+    # 2026-09-13 第五轮审查回归 (R5-29/40/41/42/43)
+    # =====================================================================
+    # R5-40: 独立 request 表 (仅 IncomingA+OutputY1, 无 Variable*/Output* 角色列)
+    {"name": "Inverse_IndependentRequest_NoRole_Rec", "func": "SolveInverse",
+     "args": lambda: (),
+     "reconstruct": _inverse_request_probe("rec", _independent_request_no_role),
+     "py_ref": lambda a: 4.0},
+    {"name": "Inverse_IndependentRequest_NoRole_Pred", "func": "SolveInverse",
+     "args": lambda: (),
+     "reconstruct": _inverse_request_probe("pred", _independent_request_no_role),
+     "py_ref": lambda a: 13.0},
+    # R5-29: 独立 request 表显式提供可调变量初值
+    {"name": "Inverse_RequestInitialValue_ArrayPath", "func": "SolveInverse",
+     "args": lambda: (),
+     "reconstruct": _inverse_request_probe("rec", _independent_request_with_init),
+     "py_ref": lambda a: 4.0},
+    # R5-29: 多输出 request (两个 Output 目标同时反解)
+    {"name": "Inverse_MultiOutput_ArrayPath", "func": "SolveInverse",
+     "args": lambda: (), "reconstruct": _inverse_multi_output_probe,
+     "py_ref": lambda a: 0.0},
+    # R5-29: SolveQuality/SolveEquation Python-list 数组路径
+    {"name": "Quality_Linear_ArrayPath", "func": "SolveQuality",
+     "args": lambda: (), "reconstruct": _quality_array_probe,
      "py_ref": lambda a: 1.0},
+    {"name": "Equation_Forward_ArrayPath", "func": "SolveEquation",
+     "args": lambda: (), "reconstruct": _equation_array_probe(1), "py_val": FWD_EXPECTED,
+     "result_type": "string", "py_ref": lambda a: FWD_EXPECTED},
+    {"name": "Equation_Inverse_ArrayPath", "func": "SolveEquation",
+     "args": lambda: (), "reconstruct": _equation_array_probe(2), "py_val": INV_EXPECTED,
+     "result_type": "string", "py_ref": lambda a: INV_EXPECTED},
+    # R5-41: poly 巨值 (1e200) → ERR_SV_NONFINITE, 不得裸 Error 6
+    {"name": "Equation_Poly_NonFinite_Raises", "func": "SolveEquation",
+     "args": lambda: ("nonfinite", ERR_SV_NONFINITE), "reconstruct": _solve_error_probe,
+     "py_ref": lambda a: float(ERR_SV_NONFINITE)},
+    # R5-42: G6 边界 999999.7 → "1E+06" (经 SolveEquation 格式化路径)
+    {"name": "Equation_G6_Edge_1E06", "func": "SolveEquation",
+     "args": lambda: (), "reconstruct": _g6_edge_probe, "py_ref": lambda a: 1.0},
+    # R5-43: 非法可选表 (多区域 Range) — UDF 返回 CVErr, 核心抛 ERR_SV_INVALID_INPUT
+    {"name": "UDF_INVERSE_InvalidOptional_CVErr", "func": "UDF_SOLVE_INVERSE",
+     "args": lambda: (), "reconstruct": _invalid_optional_probe("udf"),
+     "py_val": -1.0, "py_ref": lambda a: -1.0},
+    {"name": "INVERSE_InvalidOptional_Core_Raises", "func": "SolveInverse",
+     "args": lambda: (), "reconstruct": _invalid_optional_probe("core"),
+     "py_val": float(ERR_SV_INVALID_INPUT), "py_ref": lambda a: float(ERR_SV_INVALID_INPUT)},
 ]
 
 

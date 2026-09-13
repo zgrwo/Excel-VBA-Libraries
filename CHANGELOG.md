@@ -48,6 +48,28 @@ All notable changes to Excel VBA Libraries.
 - **SqlUtils**: `.xlsm` 需要 `Excel 12.0 Macro` ISAM 的断言经 ACE 实测**驳回**（ACE12/16 以 `Excel 12.0` 可读 .xlsm，KI-028）
 - **测试基建**: SolveUtils 交叉验证新增数组路径/poly/auto/bounds/负例（此前 24 用例全 Range + 全 linear，R4-21）；`analyze_test_gaps` 输出 array/range 路径覆盖并将仅 Range 模块标为 `partial`；负例统一改 **VBA 内直接调用探针**（错误不再穿透 COM，消除 Excel 运行时错误弹窗导致的测试中止）；`ensure_excel` 改晚绑定 `Dispatch`（消除 gencache/makepy 抖动）——全量 19/19 模块 **951P/0F** 稳定通过；新增 Json 转义代理对、Regex 错误值/1D 数组、QR 宽矩阵重构、Eigen 对称化、InteractionEffects 单水平、空白分类/大小写分类、垂直 Range 预测、未知 goal、ANOVA 高偏置、GroupBy 空白、集合标量、未知运算符、DaysInMonth/IsHoliday、ZScore 负例、SolveUtils poly 方程/auto/bounds/限额等 30+ 回归用例
 
+### Fixed（第五轮全量审查修复批 — 2026-09-13）
+
+> 报告 `.claude/reviews/CODE_REVIEW_2026-09-13_R5.md`（4 High / 多项 Medium/Low，无 Critical）。
+> 文档一致性与锚点校验 ALL PASS / VBA lint 0 Warning；相关交叉验证用例同步扩充。
+
+- **StringUtils**: 全部 UDF 标量路径补错误值守卫（`=UDF_STR_REVERSESTRING(1/0)` 返回 `#VALUE!`，不再字符串化为 `"7002 rorrE"`，R5-01）；`COMMONPREFIX`/`LEVENSHTEIN`/`BASE64DECODE`/`RANDOMSTRING` 及 `ISNULLOREMPTY`/`ISNULLORWHITESPACE` 谓词补 1D 数组路径（R5-11）；`ToTitleCase` 的 Mac 前缀增加受控例外清单（`machine` 不再变 `MacHine`，R5-13）；`RemoveDiacritics` 补 U+0218–U+021B 映射（R5-61）；`URLDecode` 对字面非 ASCII 按 UTF-8 编码输出，不再静默丢弃（R5-61）
+- **DateTimeUtils**: 新增私有 `CoerceDate` 统一日期入参（vbDate / 日期字符串 / 序列号 1..2958465；错误值/Null/Boolean/非法值显式报错，不再静默兜底为今天/0/False，R5-02/R5-23）；`DaysInYear` 接受日期并返回该日期所在年份天数（R5-24）；`IsHoliday` 接受标量节假日（与 `WorkdaysBetween` 一致，R5-44）；`DaysInMonth(9999,12)` 特判返回 31（R5-56）
+- **JsonUtils**: `JsonStringify` 对 |数值|<1 补前导 0（`0.5` 不再输出 `.5`，恢复 `JsonIsValid` 往返，R5-03）；超长数字字面量的 `Val` 溢出转 `ERR_INVALID_JSON`（R5-17）；递归深度上限 512→128 并捕获 Error 28（R5-18）；未分配数组返回 `"[]"`（R5-34）；`JsonGet` 支持已解析数组根路径（R5-48）；`AscW` 有符号算术溢出修复（R5-33）
+- **LinearUtils**: `PolyFit` 秩容差改纯相对判据（x~1e-14 小尺度数据斜率不再静默置 0，R5-04）；数组路径非数值/Boolean/Empty/Error 显式报错（R5-14）；QR / QR-Piv 迭代前全局缩放（极端量级不再上溢 Error 6 或下溢错解，R5-15）；`MatrixConditionNumber` 奇异阈值改机器精度口径、tol≤0 走 auto（R5-16）；`ToDoubleMatrix` 非数值转 `ERR_INVALID_INPUT`（R5-32）；含与 VBA 保留字冲突的局部变量改名
+- **StatsUtils**: UDF 错误码按核心错误映射 `#N/A`/`#DIV/0!`/`#NUM!`/`#VALUE!`（R5-20）；`ExtractDoubles` 检测 Error 单元格显式报错（R5-21）；`Rank`/`RankEq` 拒绝 Empty（R5-22）；`CorrelationMatrix` 零方差列报 `#DIV/0!`（R5-54）；`BetaReg` 越界 x 报错不再返回 -1 哨兵（R5-55）
+- **RegressUtils**: `ANOVAOneWay` 因子分组改 `vbBinaryCompare` 且空白/错误值判无效（R5-07）；哨兵文本改错误值/异常（Importance/InteractionEffects/FactorSweep，R5-25）；`OptimizeFactors` 空白 goal 报错（R5-51）；分类水平排序统一 `vbBinaryCompare`（R5-52）；`LinearModelPredict` 1×1 Range 多因子模型报错（R5-53）
+- **SolveUtils**: 新增单次调用总评估预算 `SV_EVAL_BUDGET`（超限 `ERR_SV_LIMIT`，R5-37）；多项式项乘法溢出转 `ERR_SV_NONFINITE`（R5-41）；独立 request 表允许缺 `Variable*`/`Output*` 角色列（R5-40）；`SvNumG6` 修正 1e6 边界失去 G6 语义（R5-42）；UDF 路径非法表参数不再静默忽略（R5-43）
+- **SqlUtils**: WHERE/ORDER BY 改词边界扫描器（跳过字符串字面量与方括号标识符；`'WHERE'` 字面量/含 WHERE 表名不再吞掉过滤，字面量 ORDER BY 不再误拒，R5-05/R5-36）；含空格/带引号表名四种入参形式归一化匹配（R5-27）；打开中的 .xlsm OpenSchema 重复表/列去重（R5-28）；`IsAddIn` 守卫置 `Nothing` 使分支可达（R5-38）；文档明确 `forLike` 仅适用 ACE SQL 路径与 `outOk` 契约（R5-26/R5-39）
+- **FileSystemUtils**: `WriteTextFile(append:=True, bom:=False)` 剥离 BOM（R5-45）；`ReadBinaryFile` 空文件返回空 `Byte()`（未分配；VBA 无零长度类型数组，调用方用 `VariantKit.IsEmptyArray` 探测，R5-46）；`ListFiles` 枚举错误重抛（R5-47）
+- **XmlUtils**: `XmlGet` 空输入显式报 `ERR_XML_EMPTY`（R5-49）；`XmlToRange` `colNames=Empty` 与省略同义走自动识别（R5-50）
+- **RegexUtils**: `GetRegex` 增加模块级最近模式缓存并复用 RegExp 对象（数组路径约 40x 提速，R5-19）
+- **VBA-Core**: `NormalizeInput`/`NormalizeTo2D` 多区域 Range fail-closed（不再静默只取首区，R5-08）；`ArrayOps.Sort`/`SortIndices` 的 numeric/text 比较器补 Null/Empty 守卫（R5-09）；`DictProxy.Merge` 跨 CompareMode 用严格模式（R5-10）；`CollectNumericColumns` 仅表头输入不再把所有列判为数值（R5-61）
+- **ArrayUtils / DictSetUtils**: 未知运算符白名单校验（不再静默返回空/False，R5-12）；`ArrayLookup` 恢复错误处理后再 Raise，错误码不再错位（R5-57）
+- **PhyChemUtils**: `DilutionSolve`/`IdealGasLaw`/`Density` 的已知项拒绝 Boolean 与非数值（`CDbl(True)=-1` 不再静默入算，R5-35）
+- **RangeUtils**: `FilterRangeToArray` 运算符入口统一归一化（Trim+LCase），空白变体不再静默只返回标题行（R5-06）
+- **测试基建**: 新增 100+ 条 R5 回归用例——String/DateTime/PhyChem 错误值→`#VALUE!`、日期序列号与非法输入、1D 谓词；Linear/Stats 小尺度 PolyFit、QR 极端量级、条件数、错误码映射；Regress/Solve UDF Range 面与数组路径、ANOVA 大小写/空白因子、评估预算、非法可选表；VBA-Core 多区域 fail-closed、Sort Null 守卫、Merge 跨模式；Array/DictSet 未知运算符；Sql 转义/WHERE 边界/含空格表名（5 个 SKIP 用例激活）。`analyze_test_gaps` 白名单补充 Test_SqlUtils 私有助手与注释误捕
+
 ### Changed
 
 - api-reference.md 补齐 `SqlEscapeString [forLike]`、`XmlGet/XmlGetAttr/XmlToRange [namespaces]` 签名；CN/EN 手册修正 PhyChem 单位（ConvertStandard m³/Pa/K、CylinderStdVolume Pa/K、CompressFactorPR Pa）、DilutionSolve/Density 未知项约定、MinMax 保留参数说明、JsonToRange 签名

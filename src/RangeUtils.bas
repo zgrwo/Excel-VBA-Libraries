@@ -1203,7 +1203,10 @@ Public Function FilterRangeToArray( _
     End If
 
     ' 运算符白名单 — 未知运算符必须报错, 不能静默返回空结果
-    Select Case LCase$(Trim$(op))
+    ' R5-06: 入口统一归一化 (Trim + LCase), 白名单与执行路径共用同一 opNorm
+    Dim opNorm As String
+    opNorm = LCase$(Trim$(op))
+    Select Case opNorm
         Case "=", "<>", "<", "<=", ">", ">=", "contains", "notcontains", _
              "startswith", "endswith", "isblank", "isnotblank", "regex"
             ' 合法运算符
@@ -1229,7 +1232,7 @@ Public Function FilterRangeToArray( _
         startRow = 1
     End If
     For i = startRow To nRows
-        If FilterPasses(data(i, colIdx), value, op) Then
+        If FilterPasses(data(i, colIdx), value, opNorm) Then
             cnt = cnt + 1
         End If
     Next i
@@ -1249,7 +1252,7 @@ Public Function FilterRangeToArray( _
 
     If includeHeader Then outIdx = 2 Else outIdx = 1
     For i = startRow To nRows
-        If FilterPasses(data(i, colIdx), value, op) Then
+        If FilterPasses(data(i, colIdx), value, opNorm) Then
             For j = 1 To nCols
                 result(outIdx, j) = data(i, j)
             Next j

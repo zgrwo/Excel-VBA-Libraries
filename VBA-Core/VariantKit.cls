@@ -15,6 +15,10 @@ Option Explicit
 '   Compare: SafeKey, ValuesEqual, Compare
 '   Assign: VarLetSet
 '   Filter: Passes
+'
+' Limitation: multi-area Range (Areas.Count > 1) is not supported —
+'   Normalize1D / Normalize2D / NormalizeTo2D fail-closed (CVErr), and
+'   NormalizeInput returns False without modifying the input.
 '=============================================================================
 
 ' ======== Probe ========
@@ -154,8 +158,13 @@ Public Function NormalizeTo2D(ByVal data As Variant, _
 
     If IsObject(data) Then
         If TypeOf data Is Range Then
+            ' 多区域 Range 不支持 (SKILL §8.1) — fail-closed, 不得静默只取首区
+            If data.Areas.Count > 1 Then
+                numRows = 0: numCols = 0
+                NormalizeTo2D = CVErr(xlErrValue)
+                Exit Function
+            End If
             Set rng = data
-            If rng.Areas.Count > 1 Then Set rng = rng.Areas(1)
             arr = rng.Value
             If Not IsArray(arr) Then
                 ReDim temp(1 To 1, 1 To 1)
@@ -230,13 +239,11 @@ Public Function NormalizeInput(ByRef v As Variant, _
     NormalizeInput = False
 
     ' Step 1: Range → Array
+    ' 多区域 Range 不支持 (SKILL §8.1) — fail-closed: 不改动 v 并返回 False
     If IsObject(v) Then
         If TypeOf v Is Range Then
-            If v.Areas.Count > 1 Then
-                v = v.Areas(1).Value
-            Else
-                v = v.Value
-            End If
+            If v.Areas.Count > 1 Then Exit Function
+            v = v.Value
             NormalizeInput = True
         End If
     End If
@@ -494,8 +501,10 @@ Public Function ValuesEqual(ByVal a As Variant, ByVal b As Variant) As Boolean
         End If
         Exit Function
     End If
-    ' 日期分支: vbDate 值已在上方 IsNumeric 路径按数值容差比较 (IsNumeric(Date)=True);
-    ' 本分支仅处理日期样式的字符串 (如 "2024-01-01", IsNumeric 为 False).
+    ' 日期分支: vbDate 值不走上方 IsNumeric 路径 (实测 IsNumeric(Date)=False, 见 SKILL §3.3);
+    ' 两个 vbDate 值在此按日期相等性比较。vbDate 与数值序列号混比不会进入本分支
+    ' (IsDate(数值)=False), 将落到末尾 CStr 比较 — 日期/序列号混合语义未定义,
+    ' 调用方应先显式归一化类型。
     If IsDate(a) And IsDate(b) Then
         Dim da As Variant, db As Variant
         Dim okA As Boolean, okB As Boolean
@@ -670,6 +679,8 @@ Public Sub Test_VariantKit()
     Dim failCount As Long: failCount = 0
     Dim arr As Variant, result As Variant, arr2D As Variant
     Dim numRows As Long, numCols As Long, i As Long
+    Dim multiArea As Range, v As Variant
+    Dim maErr As Long, maIsErr As Boolean
 
     '=====================================================================
     ' Normalize1D — scalar → array
@@ -732,6 +743,27 @@ Public Sub Test_VariantKit()
     If Not (numCols = 2) Then Err.Raise 5
     If Not (result(1, 1) = 100) Then Err.Raise 5
     If Not (result(2, 2) = 400) Then Err.Raise 5
+
+    '=====================================================================
+    ' 多区域 Range — fail-closed (2026-09-13 R5-08: 不得静默只取首区)
+    '=====================================================================
+    Set multiArea = Union(ActiveSheet.Range("A1:A2"), ActiveSheet.Range("C1:C2"))
+
+    ' NormalizeInput — 返回 False 且 v 保持原 Range 对象 (不改动输入)
+    Set v = multiArea
+    If NormalizeInput(v) Then Err.Raise 5
+    If Not IsObject(v) Then Err.Raise 5
+
+    ' NormalizeTo2D — 返回 CVErr (Variant() 若无法承载 Error 标量, 则以运行时
+    ' 错误 fail-closed; 两种形态都不得静默返回首区数据)
+    On Error Resume Next
+    Err.Clear
+    result = NormalizeTo2D(multiArea, numRows, numCols)
+    maErr = Err.Number
+    maIsErr = IsError(result)
+    Err.Clear
+    On Error GoTo ErrHandler
+    If maErr = 0 And Not maIsErr Then Err.Raise 5
 
     '=====================================================================
     ' SafeKey — type-disambiguated key

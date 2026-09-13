@@ -1793,7 +1793,7 @@ CrossJoin(rng1, rng2) As Variant
 
 #### SqlExecute
 
-执行任意 SQL 语句，返回 2D Variant 数组 (含列名标题行)。**仅 VBA** (通过 outOk 参数指示成功/失败)。
+执行任意 SQL 语句，返回 2D Variant 数组 (含列名标题行)。**仅 VBA** (通过 outOk 参数指示成功/失败)。输入/环境错误抛 `Err.Raise`；SQL 执行错误返回空结果并置 `outOk=False`（错误文本经 `outErrorMsg`）。
 
 **VBA Usage**
 ```vb
@@ -1865,7 +1865,7 @@ SqlGetConnection([filePath], outOk) As Object
 
 #### SqlRangeQuery
 
-对 Range 直接查询，无需保存工作簿。使用 ADODB Recordset 在内存中操作。支持 SELECT * 和 WHERE 筛选。
+对 Range 直接查询，无需保存工作簿。使用 ADODB Recordset 在内存中操作。支持 SELECT * 和 WHERE 筛选。WHERE 由 `Recordset.Filter` 执行：`[`/`]` 按字面量匹配，不支持 `IN`/`NOT IN`/`BETWEEN`（与 ACE SQL 的 LIKE 语义不同）；单单元格 Range 输入原样返回，不解析 WHERE。
 
 **VBA Usage**
 ```vb
@@ -2043,7 +2043,11 @@ SqlListTables([filePath], outOk) As Variant()
 
 > **环境要求**: SqlUtils 依赖 ADODB 和 ACE/Jet OLEDB 提供程序。64 位 Office 需安装 Access Database Engine。若工作簿未保存，使用 SqlRangeQuery 可直接对 Range 查询。
 >
+> **outOk 契约**: 输入/环境错误（空 SQL、工作簿未保存、无可用的活动工作簿、路径含 `;`/`"` 或文件不存在/无法打开、ADODB 或提供程序不可用）抛 `Err.Raise`；SQL 执行错误（语法错误、表/列不存在等）不抛异常，返回空结果并置 `outOk=False`（`SqlExecute` 另经 `outErrorMsg` 返回错误文本）。
+>
 > **⚠️ SQL 注入防护**: ACE OLEDB Excel ISAM 驱动不支持参数化查询。使用 `SqlEscapeString()` 转义来自单元格的用户输入（`'` → `''`），避免在 `WHERE`/`VALUES` 子句中直接拼接未转义的用户输入: `=UDF_SQL_QUERY("SELECT * FROM [Sheet1$] WHERE Name = '" & SqlEscapeString(A1) & "'")`。注意: Error 值单元格（#N/A、#VALUE! 等）会被静默转为空字符串（防 `CStr` 崩溃）——上游数据含 Error 时可能得到空结果集，请先清理数据。LIKE 模式请使用 `SqlEscapeString(value, True)`（ACE 方括号转义语法：`%`→`[%]`、`_`→`[_]`、`[`→`[[]`）。
+>
+> **LIKE 转义适用路径**: `SqlEscapeString(value, True)` 的方括号转义仅适用于 ACE/Jet SQL 文本路径（`SqlExecute`/`SqlQuery`/`SqlJoin`/`SqlGroupBy`）。`SqlRangeQuery` 的 WHERE 由 ADODB `Recordset.Filter` 执行，`[`/`]` 按字面量匹配，且不支持 `IN`/`NOT IN`/`BETWEEN`；单单元格 Range 输入直接原样返回，不应用 WHERE（`tableAlias` 仅作占位）。
 >
 > **命名约定**: 工作表名在 SQL 中需加 `$` 后缀并用方括号包裹，如 `[Sheet1$]`。列名含特殊字符时 SqlRangeQuery 会自动清理。
 ---
@@ -2183,7 +2187,7 @@ Ap = PseudoInverse(A)
 
 #### EigenSymmetric
 
-对称矩阵特征分解 A = V * D * V^T。使用 Jacobi 旋转算法。自动检查对称性，特征值降序排列。
+对称矩阵特征分解 A = V * D * V^T。使用 Jacobi 旋转算法。按尺度感知容差检查对称性：容差内不对称输入显式取对称部分 (A+Aᵀ)/2，超容差抛错。特征值降序排列。
 
 **VBA Usage**
 ```vb
@@ -2374,19 +2378,19 @@ F = MatrixHadamard(A, B)        ' A (Hadamard) B 逐元素乘积
 
 #### QRDecomposition
 
-基于 Householder 反射的 QR 分解 A = Q*R。Sub 过程通过 ByRef 返回 Q 和 R。
+基于 Householder 反射的 QR 分解 A = Q*R。Sub 过程通过 ByRef 返回 Q 和 R。`economy=False` (默认) 返回完整 Q(m×m) 与 R(m×n)；`economy=True` 返回标准 reduced QR：Q=m×maxK、R=maxK×n (maxK=min(m,n))，宽矩阵 (m<n) 时 R 保留全部 n 列，Q·R=A 可重构。
 
 **VBA Usage**
 ```vb
-QRDecomposition A, Q, R, True      ' 经济模式: Q(mxk), R(kxk)
+QRDecomposition A, Q, R, True      ' 经济模式 (reduced): Q(m×maxK), R(maxK×n)
 ```
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | A | Double(,) | 输入矩阵 |
 | Q | Double(,) | 输出: 正交矩阵 (ByRef) |
-| R | Double(,) | 输出: 上三角矩阵 (ByRef) |
-| economy | Boolean | 可选. 经济模式 (默认 True) |
+| R | Double(,) | 输出: 上三角/上梯形矩阵 (ByRef) |
+| economy | Boolean | 可选. 经济模式 (默认 False) |
 
 **UDF Usage**
 ```
@@ -3399,6 +3403,8 @@ sweep = FactorSweep(model, 1, 100#, 140#, 11)
 
 字符串提取、编码转换、格式校验、编辑距离、随机生成与文本清洗。**模块**: `StringUtils.bas`
 
+> **错误值约定**: 标量路径下 `UDF_STR_*` 遇到 Excel 错误值（#N/A、#DIV/0! 等）返回 `#VALUE!`（数组路径逐元素保留原错误值）；例外：`UDF_STR_ISNULLOREMPTY` / `UDF_STR_ISNULLORWHITESPACE` 将错误值视为"空"返回 `TRUE`。
+
 **Quick Reference**
 
 | 函数 | 参数 | 说明 | 返回值 |
@@ -3860,7 +3866,7 @@ s = Truncate("Hello World", 8)  ' → "Hello..."
 <a id="isnullorwhitespace"></a>
 #### IsNullOrEmpty / IsNullOrWhitespace
 
-空值判断：IsNullOrEmpty 检查 Null/Empty/零长度字符串；IsNullOrWhitespace 额外拒绝纯空白字符。
+空值判断：IsNullOrEmpty 检查 Null/Empty/零长度字符串；IsNullOrWhitespace 额外拒绝纯空白字符。UDF 形式支持 Range、2D/1D 数组输入（逐元素返回判断结果）。
 
 ```vb
 IsNullOrEmpty(value) As Boolean
@@ -4489,6 +4495,8 @@ ws.Range("A1").Resize(UBound(arr,1), UBound(arr,2)).Value = arr
 
 日期信息提取、工作日计算、Unix 时间戳转换、年龄与节假日。**模块**: `DateTimeUtils.bas`
 
+> **日期入参统一契约**: 日期参数接受日期值、日期字符串或 Excel 日期序列号 (1..2958465)；省略/空白表示今天；错误值、Null、Boolean、非法字符串或越界序列号报错（UDF 返回 `#VALUE!`）。纯数值按序列号解释：`DaysInMonth(2024)` 为 1905-07-16 当月天数，年份请用双参数 `DaysInMonth(2024, 2)`。`DaysInYear` 接受日期并返回该日期所在年份的天数（如 `DaysInYear("2024-02-15")` → 366），`DaysInYear`/`IsLeapYear` 也可直接传年份数值；`DaysInMonth(9999, 12)` 返回 31。`IsHoliday` 的 holidays 支持标量（日期/日期字符串/序列号/空白）以及数组/Range/Dictionary。
+
 **Quick Reference**
 
 | 函数 | 参数 | 说明 | 返回值 |
@@ -4605,7 +4613,7 @@ n = Quarter(#2024-07-15#)               ' → 3
 n = FiscalYear(#2025-12-15#, 7)         ' → 2026 (7 月起)
 ```
 
-> 单参数 `DaysInMonth(x)`：`x` 为日期、日期字符串或 Excel 日期序列号（纯数值按序列号解释，如 2024 → 1905-07-15）；
+> 单参数 `DaysInMonth(x)`：`x` 为日期、日期字符串或 Excel 日期序列号（纯数值按序列号解释，如 2024 → 1905-07-16）；
 > 无参数返回当月天数；非法/越界序列号报错。
 
 **UDF Usage**
@@ -5511,7 +5519,7 @@ mw = MolecularWeight("CuSO4·5H2O")    ' → 249.69  (supports · and + hydrate 
 
 #### DilutionSolve
 
-C1 * V1 = C2 * V2 求解器。四个参数中传入三个数值，待求解参数传 Empty（或留空/省略；0 是有效值，不作为未知标记）。返回求解值。
+C1 * V1 = C2 * V2 求解器。四个参数中传入三个数值，待求解参数传 Empty（或留空/省略；0 是有效值，不作为未知标记）。已知项必须为数值——Boolean、文本等非数值报错（UDF 返回 `#VALUE!`）。返回求解值。
 
 **VBA Usage**
 ```vb
@@ -5554,7 +5562,7 @@ m = MolesToMass(2, 18.015)     ' → 36.03 (g H2O)
 
 #### Density
 
-密度求解器：通过 m/V/rho 中任意两个已知量计算第三个，待求项传 Empty（或留空/省略；0 是有效值）。
+密度求解器：通过 m/V/rho 中任意两个已知量计算第三个，待求项传 Empty（或留空/省略；0 是有效值）。已知项必须为数值——Boolean、文本等非数值报错（UDF 返回 `#VALUE!`）。
 
 ```vb
 Density(m, v, rho) As Double
@@ -5660,7 +5668,7 @@ result = ConvertStandard(0.01, 202650, 298.15, 28.01)
 
 #### IdealGasLaw
 
-PV = nRT 求解器。四个参数中传入三个数值，待求解参数传 Empty (或省略)。R = 8.314 J/(mol·K)。**P 单位 Pa，V 单位 m³，T 单位 K**。
+PV = nRT 求解器。四个参数中传入三个数值，待求解参数传 Empty (或省略)。已知项必须为数值——Boolean、文本等非数值报错（UDF 返回 `#VALUE!`）。R = 8.314 J/(mol·K)。**P 单位 Pa，V 单位 m³，T 单位 K**。
 
 ```vb
 IdealGasLaw(P, V, n, T) As Double

@@ -86,6 +86,9 @@ Private DP As New DictProxy
 Private Const ERR_NOT_AVAIL As Long = vbObjectError + 1001  ' Reserved
 Private Const B64_CHARS As String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
+' 受控例外清单 (R5-13): 以 "Mac" 开头但非姓氏的常见普通词 (小写比较), 懒初始化见 IsMacExceptionWord
+Private MAC_EXCEPTIONS As Variant
+
 
 '=============================================================================
 ' ExtractBetween — 取两个分隔符之间的文本
@@ -153,7 +156,7 @@ End Function
 ' RemoveDiacritics — 移除变音符号
 '
 ' 例: "café résumé naïve" → "cafe resume naive"
-' 覆盖: Latin-1 Supplement (U+00C0–U+00FF)
+' 覆盖: Latin-1 Supplement + Latin Extended-A + Latin Extended-B 罗马尼亚语子集 (R5-61)
 '=============================================================================
 Public Function RemoveDiacritics(ByVal text As String) As String
     Dim i As Long, ch As String
@@ -170,7 +173,7 @@ Public Function RemoveDiacritics(ByVal text As String) As String
     For i = 1 To Len(text)
         ch = Mid$(text, i, 1)
         code = AscW(ch)
-        If code >= 192 And code <= 383 Then  ' Latin-1 Supplement + Latin Extended-A (#11)
+        If (code >= 192 And code <= 383) Or (code >= 536 And code <= 539) Then  ' Latin-1 + Extended-A + Extended-B 子集 (#11, R5-61)
             parts(pIdx) = DiacriticMap(code)
         Else
             parts(pIdx) = ch
@@ -880,22 +883,57 @@ Public Function ToTitleCase(ByVal text As String) As String
     ToTitleCase = result
 End Function
 
+' 判断小写单词是否命中 Mac 例外清单; 前缀匹配同时覆盖派生形式 (machines/macros 等)
+Private Function IsMacExceptionWord(ByVal wordLower As String) As Boolean
+    Dim i As Long
+    If IsEmpty(MAC_EXCEPTIONS) Then
+        MAC_EXCEPTIONS = Array("machine", "machinery", "macos", "macy", "macaw", _
+                               "macaque", "macro", "macron", "macrame", "macula", "macadam")
+    End If
+    For i = LBound(MAC_EXCEPTIONS) To UBound(MAC_EXCEPTIONS)
+        If wordLower = MAC_EXCEPTIONS(i) Then
+            IsMacExceptionWord = True: Exit Function
+        End If
+        If Len(wordLower) > Len(MAC_EXCEPTIONS(i)) Then
+            If Left$(wordLower, Len(MAC_EXCEPTIONS(i))) = MAC_EXCEPTIONS(i) Then
+                IsMacExceptionWord = True: Exit Function
+            End If
+        End If
+    Next i
+End Function
+
 ' FixNamePrefix: 修复 Mac/Mc 姓氏大写 (Macdonald→MacDonald, Mcdonald→McDonald)
 ' 注: 输入来自 ToTitleCase 的 Title Case 文本（非小写），通过 vbTextCompare
 ' 比较实现大小写不敏感匹配，不依赖输入大小写假设
+' 启发式限制 (R5-13): 仅受控例外清单内的普通词被排除; 未列入的罕见
+'   普通 "mac" 词仍会被大写第 4 字符 (如 macadamia)
 Private Function FixNamePrefix(ByVal text As String) As String
     Dim i As Long, n As Long, adv As Long, ch As String, prev As String
+    Dim wordEnd As Long, wordLower As String
     n = Len(text): i = 1
     Do While i <= n
         adv = 1
-        ' 检查前一个字符是否为非字母 (词边界), 防止 "machine" → "MacHine" (#12)
+        ' 词边界: 前一个字符是否为非字母
         If i > 1 Then prev = Mid$(text, i - 1, 1) Else prev = " "
         If i + 2 <= n Then
             If (prev < "A" Or prev > "z" Or (prev > "Z" And prev < "a")) Then
                 If StrComp(Mid$(text, i, 3), "Mac", vbTextCompare) = 0 Then
-                    If i + 3 <= n Then
-                        ch = Mid$(text, i + 3, 1)
-                        If ch >= "a" And ch <= "z" Then Mid$(text, i + 3, 1) = UCase$(ch)
+                    ' R5-13: 提取整词, 命中例外清单则不做 MacX 大写 (machine→Machine)
+                    wordEnd = i
+                    Do While wordEnd <= n
+                        ch = Mid$(text, wordEnd, 1)
+                        If (ch >= "A" And ch <= "Z") Or (ch >= "a" And ch <= "z") Then
+                            wordEnd = wordEnd + 1
+                        Else
+                            Exit Do
+                        End If
+                    Loop
+                    wordLower = LCase$(Mid$(text, i, wordEnd - i))
+                    If Not IsMacExceptionWord(wordLower) Then
+                        If i + 3 <= n Then
+                            ch = Mid$(text, i + 3, 1)
+                            If ch >= "a" And ch <= "z" Then Mid$(text, i + 3, 1) = UCase$(ch)
+                        End If
                     End If
                     adv = 3
                 End If
@@ -1158,6 +1196,7 @@ End Function
 ' URLEncode / URLDecode — URL 编解码
 '
 ' 空格编码为 "%20" (RFC 3986 标准)，解码同时兼容 "%20" 和 "+"
+' URLDecode 对字面非 ASCII 字符按 UTF-8 编码后解码 (R5-61)，不再静默丢弃
 '=============================================================================
 Public Function URLEncode(ByVal text As String) As String
     Dim i As Long, code As Long, lo As Long
@@ -1217,10 +1256,12 @@ Public Function URLDecode(ByVal text As String) As String
     End If
 
     Dim bytes() As Byte
-    ReDim bytes(0 To Len(text) - 1)
+    ' 每 UTF-16 码元最多 3 字节; 代理对按单码点输出 4 字节 (R5-61 字面非 ASCII 支持)
+    ReDim bytes(0 To Len(text) * 3)
     Dim byteIdx As Long: byteIdx = 0
     Dim i As Long, n As Long
     Dim ch As String, hexStr As String
+    Dim code As Long, lo2 As Long
 
     n = Len(text): i = 1
     Do While i <= n
@@ -1248,9 +1289,30 @@ Public Function URLDecode(ByVal text As String) As String
                 i = i + 1
             End If
         Else
-            If (AscW(ch) And &HFFFF&) <= 255 Then
-                bytes(byteIdx) = CByte(AscW(ch))
+            code = AscW(ch) And &HFFFF&
+            If code >= &HD800& And code <= &HDBFF& And i < n Then
+                lo2 = AscW(Mid$(text, i + 1, 1)) And &HFFFF&
+                If lo2 >= &HDC00& And lo2 <= &HDFFF& Then
+                    code = &H10000 + ((code - &HD800&) * &H400&) + (lo2 - &HDC00&)
+                    i = i + 1
+                End If
+            End If
+            ' 字面非 ASCII 字符按 UTF-8 编码写入字节流, 不得静默丢弃 (R5-61)
+            If code < &H80& Then
+                bytes(byteIdx) = CByte(code)
                 byteIdx = byteIdx + 1
+            ElseIf code < &H800& Then
+                bytes(byteIdx) = CByte(&HC0& Or (code \ &H40&)): byteIdx = byteIdx + 1
+                bytes(byteIdx) = CByte(&H80& Or (code And &H3F&)): byteIdx = byteIdx + 1
+            ElseIf code < &H10000 Then
+                bytes(byteIdx) = CByte(&HE0& Or (code \ &H1000&)): byteIdx = byteIdx + 1
+                bytes(byteIdx) = CByte(&H80& Or ((code \ &H40&) And &H3F&)): byteIdx = byteIdx + 1
+                bytes(byteIdx) = CByte(&H80& Or (code And &H3F&)): byteIdx = byteIdx + 1
+            Else
+                bytes(byteIdx) = CByte(&HF0& Or (code \ &H40000&)): byteIdx = byteIdx + 1
+                bytes(byteIdx) = CByte(&H80& Or ((code \ &H1000&) And &H3F&)): byteIdx = byteIdx + 1
+                bytes(byteIdx) = CByte(&H80& Or ((code \ &H40&) And &H3F&)): byteIdx = byteIdx + 1
+                bytes(byteIdx) = CByte(&H80& Or (code And &H3F&)): byteIdx = byteIdx + 1
             End If
             i = i + 1
         End If
@@ -1866,6 +1928,7 @@ Public Function UDF_STR_EXTRACTBETWEEN( _
         Next: Next
         UDF_STR_EXTRACTBETWEEN = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_EXTRACTBETWEEN = CVErr(xlErrValue): Exit Function
     UDF_STR_EXTRACTBETWEEN = ExtractBetween(CStr(text), leftDelim, rightDelim, nth, includeDelim): Exit Function
 EH: UDF_STR_EXTRACTBETWEEN = CVErr(xlErrValue)
 End Function
@@ -1893,6 +1956,7 @@ Public Function UDF_STR_REVERSESTRING(ByVal text As Variant) As Variant
         Next: Next
         UDF_STR_REVERSESTRING = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_REVERSESTRING = CVErr(xlErrValue): Exit Function
     UDF_STR_REVERSESTRING = ReverseString(CStr(text)): Exit Function
 EH: UDF_STR_REVERSESTRING = CVErr(xlErrValue)
 End Function
@@ -1922,6 +1986,7 @@ Public Function UDF_STR_COUNTSUBSTRING( _
         Next: Next
         UDF_STR_COUNTSUBSTRING = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_COUNTSUBSTRING = CVErr(xlErrValue): Exit Function
     UDF_STR_COUNTSUBSTRING = CountSubstring(CStr(text), search, caseSensitive): Exit Function
 EH: UDF_STR_COUNTSUBSTRING = CVErr(xlErrValue)
 End Function
@@ -1951,6 +2016,7 @@ Public Function UDF_STR_STARTSWITH( _
         Next: Next
         UDF_STR_STARTSWITH = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_STARTSWITH = CVErr(xlErrValue): Exit Function
     UDF_STR_STARTSWITH = StartsWith(CStr(text), prefix, caseSensitive): Exit Function
 EH: UDF_STR_STARTSWITH = CVErr(xlErrValue)
 End Function
@@ -1980,6 +2046,7 @@ Public Function UDF_STR_ENDSWITH( _
         Next: Next
         UDF_STR_ENDSWITH = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_ENDSWITH = CVErr(xlErrValue): Exit Function
     UDF_STR_ENDSWITH = EndsWith(CStr(text), suffix, caseSensitive): Exit Function
 EH: UDF_STR_ENDSWITH = CVErr(xlErrValue)
 End Function
@@ -2009,6 +2076,7 @@ Public Function UDF_STR_LEFTOF( _
         Next: Next
         UDF_STR_LEFTOF = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_LEFTOF = CVErr(xlErrValue): Exit Function
     UDF_STR_LEFTOF = LeftOf(CStr(text), delimiter, nth): Exit Function
 EH: UDF_STR_LEFTOF = CVErr(xlErrValue)
 End Function
@@ -2039,6 +2107,7 @@ Public Function UDF_STR_RIGHTOF( _
         Next: Next
         UDF_STR_RIGHTOF = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_RIGHTOF = CVErr(xlErrValue): Exit Function
     UDF_STR_RIGHTOF = RightOf(CStr(text), delimiter, nth, fromRight): Exit Function
 EH: UDF_STR_RIGHTOF = CVErr(xlErrValue)
 End Function
@@ -2075,6 +2144,7 @@ Public Function UDF_STR_NTHWORD( _
         Next: Next
         UDF_STR_NTHWORD = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_NTHWORD = CVErr(xlErrValue): Exit Function
     UDF_STR_NTHWORD = NthWord(CStr(text), n, delimiter): Exit Function
 EH: UDF_STR_NTHWORD = CVErr(xlErrValue)
 End Function
@@ -2088,6 +2158,16 @@ Public Function UDF_STR_COMMONPREFIX( _
     If IsObject(a) Then If TypeOf a Is Range Then a = a.Value
     If IsObject(b) Then If TypeOf b Is Range Then b = b.Value
     If IsArray(a) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(a, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(a) To UBound(a))
+            Dim kk As Long
+            For kk = LBound(a) To UBound(a): tx2(1, kk) = a(kk): Next kk
+            a = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(a,1) To UBound(a,1), LBound(a,2) To UBound(a,2))
         For i = LBound(a,1) To UBound(a,1)
             For j = LBound(a,2) To UBound(a,2)
@@ -2095,6 +2175,7 @@ Public Function UDF_STR_COMMONPREFIX( _
         Next: Next
         UDF_STR_COMMONPREFIX = resultArr: Exit Function
     End If
+    If IsError(a) Or IsError(b) Then UDF_STR_COMMONPREFIX = CVErr(xlErrValue): Exit Function
     UDF_STR_COMMONPREFIX = CommonPrefix(CStr(a), CStr(b), caseSensitive): Exit Function
 EH: UDF_STR_COMMONPREFIX = CVErr(xlErrValue)
 End Function
@@ -2125,6 +2206,7 @@ Public Function UDF_STR_PADLEFT( _
         Next: Next
         UDF_STR_PADLEFT = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_PADLEFT = CVErr(xlErrValue): Exit Function
     UDF_STR_PADLEFT = PadLeft(CStr(text), totalWidth, padChar): Exit Function
 EH: UDF_STR_PADLEFT = CVErr(xlErrValue)
 End Function
@@ -2154,6 +2236,7 @@ Public Function UDF_STR_PADRIGHT( _
         Next: Next
         UDF_STR_PADRIGHT = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_PADRIGHT = CVErr(xlErrValue): Exit Function
     UDF_STR_PADRIGHT = PadRight(CStr(text), totalWidth, padChar): Exit Function
 EH: UDF_STR_PADRIGHT = CVErr(xlErrValue)
 End Function
@@ -2183,6 +2266,7 @@ Public Function UDF_STR_TRUNCATE( _
         Next: Next
         UDF_STR_TRUNCATE = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_TRUNCATE = CVErr(xlErrValue): Exit Function
     UDF_STR_TRUNCATE = Truncate(CStr(text), maxLength, suffix): Exit Function
 EH: UDF_STR_TRUNCATE = CVErr(xlErrValue)
 End Function
@@ -2209,6 +2293,7 @@ Public Function UDF_STR_NORMALIZEWHITESPACE(ByVal text As Variant) As Variant
         Next: Next
         UDF_STR_NORMALIZEWHITESPACE = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_NORMALIZEWHITESPACE = CVErr(xlErrValue): Exit Function
     UDF_STR_NORMALIZEWHITESPACE = NormalizeWhitespace(CStr(text)): Exit Function
 EH: UDF_STR_NORMALIZEWHITESPACE = CVErr(xlErrValue)
 End Function
@@ -2237,6 +2322,7 @@ Public Function UDF_STR_REMOVECHARS( _
         Next: Next
         UDF_STR_REMOVECHARS = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_REMOVECHARS = CVErr(xlErrValue): Exit Function
     UDF_STR_REMOVECHARS = RemoveChars(CStr(text), charsToRemove): Exit Function
 EH: UDF_STR_REMOVECHARS = CVErr(xlErrValue)
 End Function
@@ -2265,6 +2351,7 @@ Public Function UDF_STR_KEEPCHARS( _
         Next: Next
         UDF_STR_KEEPCHARS = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_KEEPCHARS = CVErr(xlErrValue): Exit Function
     UDF_STR_KEEPCHARS = KeepChars(CStr(text), allowedChars): Exit Function
 EH: UDF_STR_KEEPCHARS = CVErr(xlErrValue)
 End Function
@@ -2291,6 +2378,7 @@ Public Function UDF_STR_TOTITLECASE(ByVal text As Variant) As Variant
         Next: Next
         UDF_STR_TOTITLECASE = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_TOTITLECASE = CVErr(xlErrValue): Exit Function
     UDF_STR_TOTITLECASE = ToTitleCase(CStr(text)): Exit Function
 EH: UDF_STR_TOTITLECASE = CVErr(xlErrValue)
 End Function
@@ -2317,6 +2405,7 @@ Public Function UDF_STR_REMOVEDIACRITICS(ByVal text As Variant) As Variant
         Next: Next
         UDF_STR_REMOVEDIACRITICS = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_REMOVEDIACRITICS = CVErr(xlErrValue): Exit Function
     UDF_STR_REMOVEDIACRITICS = RemoveDiacritics(CStr(text)): Exit Function
 EH: UDF_STR_REMOVEDIACRITICS = CVErr(xlErrValue)
 End Function
@@ -2345,17 +2434,64 @@ Public Function UDF_STR_SLUGIFY( _
         Next: Next
         UDF_STR_SLUGIFY = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_SLUGIFY = CVErr(xlErrValue): Exit Function
     UDF_STR_SLUGIFY = Slugify(CStr(text), separator): Exit Function
 EH: UDF_STR_SLUGIFY = CVErr(xlErrValue)
 End Function
 
 Public Function UDF_STR_ISNULLOREMPTY(ByVal text As Variant) As Variant
-    On Error GoTo EH:     UDF_STR_ISNULLOREMPTY = IsNullOrEmpty(text): Exit Function
+    Dim i As Long, j As Long, resultArr() As Variant
+    On Error GoTo EH
+    If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
+    If IsArray(text) Then
+        ' 1D 数组支持 (R5-11): 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
+        ReDim resultArr(LBound(text, 1) To UBound(text, 1), LBound(text, 2) To UBound(text, 2))
+        For i = LBound(text, 1) To UBound(text, 1)
+            For j = LBound(text, 2) To UBound(text, 2)
+                ' 谓词语义: 空/Null/Error 由核心判定为 True (与标量路径一致)
+                resultArr(i, j) = IsNullOrEmpty(text(i, j))
+            Next
+        Next
+        UDF_STR_ISNULLOREMPTY = resultArr: Exit Function
+    End If
+    UDF_STR_ISNULLOREMPTY = IsNullOrEmpty(text): Exit Function
 EH: UDF_STR_ISNULLOREMPTY = CVErr(xlErrValue)
 End Function
 
 Public Function UDF_STR_ISNULLORWHITESPACE(ByVal text As Variant) As Variant
-    On Error GoTo EH: UDF_STR_ISNULLORWHITESPACE = IsNullOrWhitespace(text): Exit Function
+    Dim i As Long, j As Long, resultArr() As Variant
+    On Error GoTo EH
+    If IsObject(text) Then If TypeOf text Is Range Then text = text.Value
+    If IsArray(text) Then
+        ' 1D 数组支持 (R5-11): 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(text, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(text) To UBound(text))
+            Dim kk As Long
+            For kk = LBound(text) To UBound(text): tx2(1, kk) = text(kk): Next kk
+            text = tx2
+        End If
+        On Error GoTo EH
+        ReDim resultArr(LBound(text, 1) To UBound(text, 1), LBound(text, 2) To UBound(text, 2))
+        For i = LBound(text, 1) To UBound(text, 1)
+            For j = LBound(text, 2) To UBound(text, 2)
+                ' 谓词语义: 空/Null/Error 由核心判定为 True (与标量路径一致)
+                resultArr(i, j) = IsNullOrWhitespace(text(i, j))
+            Next
+        Next
+        UDF_STR_ISNULLORWHITESPACE = resultArr: Exit Function
+    End If
+    UDF_STR_ISNULLORWHITESPACE = IsNullOrWhitespace(text): Exit Function
 EH: UDF_STR_ISNULLORWHITESPACE = CVErr(xlErrValue)
 End Function
 
@@ -2381,6 +2517,7 @@ Public Function UDF_STR_ISEMAIL(ByVal text As Variant) As Variant
         Next: Next
         UDF_STR_ISEMAIL = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_ISEMAIL = CVErr(xlErrValue): Exit Function
     UDF_STR_ISEMAIL = IsEmail(CStr(text)): Exit Function
 EH: UDF_STR_ISEMAIL = CVErr(xlErrValue)
 End Function
@@ -2407,6 +2544,7 @@ Public Function UDF_STR_ISURL(ByVal text As Variant) As Variant
         Next: Next
         UDF_STR_ISURL = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_ISURL = CVErr(xlErrValue): Exit Function
     UDF_STR_ISURL = IsUrl(CStr(text)): Exit Function
 EH: UDF_STR_ISURL = CVErr(xlErrValue)
 End Function
@@ -2420,6 +2558,16 @@ Public Function UDF_STR_LEVENSHTEIN( _
     If IsObject(a) Then If TypeOf a Is Range Then a = a.Value
     If IsObject(b) Then If TypeOf b Is Range Then b = b.Value
     If IsArray(a) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(a, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(a) To UBound(a))
+            Dim kk As Long
+            For kk = LBound(a) To UBound(a): tx2(1, kk) = a(kk): Next kk
+            a = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(a,1) To UBound(a,1), LBound(a,2) To UBound(a,2))
         For i = LBound(a,1) To UBound(a,1)
             For j = LBound(a,2) To UBound(a,2)
@@ -2427,6 +2575,7 @@ Public Function UDF_STR_LEVENSHTEIN( _
         Next: Next
         UDF_STR_LEVENSHTEIN = resultArr: Exit Function
     End If
+    If IsError(a) Or IsError(b) Then UDF_STR_LEVENSHTEIN = CVErr(xlErrValue): Exit Function
     UDF_STR_LEVENSHTEIN = LevenshteinDistance(CStr(a), CStr(b), caseSensitive): Exit Function
 EH: UDF_STR_LEVENSHTEIN = CVErr(xlErrValue)
 End Function
@@ -2453,6 +2602,7 @@ Public Function UDF_STR_SOUNDEX(ByVal text As Variant) As Variant
         Next: Next
         UDF_STR_SOUNDEX = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_SOUNDEX = CVErr(xlErrValue): Exit Function
     UDF_STR_SOUNDEX = Soundex(CStr(text)): Exit Function
 EH: UDF_STR_SOUNDEX = CVErr(xlErrValue)
 End Function
@@ -2479,6 +2629,7 @@ Public Function UDF_STR_URLENCODE(ByVal text As Variant) As Variant
         Next: Next
         UDF_STR_URLENCODE = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_URLENCODE = CVErr(xlErrValue): Exit Function
     UDF_STR_URLENCODE = URLEncode(CStr(text)): Exit Function
 EH: UDF_STR_URLENCODE = CVErr(xlErrValue)
 End Function
@@ -2505,6 +2656,7 @@ Public Function UDF_STR_URLDECODE(ByVal text As Variant) As Variant
         Next: Next
         UDF_STR_URLDECODE = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_URLDECODE = CVErr(xlErrValue): Exit Function
     UDF_STR_URLDECODE = URLDecode(CStr(text)): Exit Function
 EH: UDF_STR_URLDECODE = CVErr(xlErrValue)
 End Function
@@ -2533,6 +2685,7 @@ Public Function UDF_STR_BASE64ENCODE( _
         Next: Next
         UDF_STR_BASE64ENCODE = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_BASE64ENCODE = CVErr(xlErrValue): Exit Function
     UDF_STR_BASE64ENCODE = Base64Encode(CStr(text), encoding): Exit Function
 EH: UDF_STR_BASE64ENCODE = CVErr(xlErrValue)
 End Function
@@ -2544,6 +2697,16 @@ Public Function UDF_STR_BASE64DECODE( _
     On Error GoTo EH
     If IsObject(base64) Then If TypeOf base64 Is Range Then base64 = base64.Value
     If IsArray(base64) Then
+        ' 1D 数组支持: 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射 (避免 Error 9 拒绝合法输入)
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(base64, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(base64) To UBound(base64))
+            Dim kk As Long
+            For kk = LBound(base64) To UBound(base64): tx2(1, kk) = base64(kk): Next kk
+            base64 = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(base64,1) To UBound(base64,1), LBound(base64,2) To UBound(base64,2))
         For i = LBound(base64,1) To UBound(base64,1)
             For j = LBound(base64,2) To UBound(base64,2)
@@ -2551,6 +2714,7 @@ Public Function UDF_STR_BASE64DECODE( _
         Next: Next
         UDF_STR_BASE64DECODE = resultArr: Exit Function
     End If
+    If IsError(base64) Then UDF_STR_BASE64DECODE = CVErr(xlErrValue): Exit Function
     UDF_STR_BASE64DECODE = Base64Decode(CStr(base64), encoding): Exit Function
 EH: UDF_STR_BASE64DECODE = CVErr(xlErrValue)
 End Function
@@ -2577,6 +2741,7 @@ Public Function UDF_STR_HTMLENCODE(ByVal text As Variant) As Variant
         Next: Next
         UDF_STR_HTMLENCODE = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_HTMLENCODE = CVErr(xlErrValue): Exit Function
     UDF_STR_HTMLENCODE = HTMLEncode(CStr(text)): Exit Function
 EH: UDF_STR_HTMLENCODE = CVErr(xlErrValue)
 End Function
@@ -2603,6 +2768,7 @@ Public Function UDF_STR_HTMLDECODE(ByVal text As Variant) As Variant
         Next: Next
         UDF_STR_HTMLDECODE = resultArr: Exit Function
     End If
+    If IsError(text) Then UDF_STR_HTMLDECODE = CVErr(xlErrValue): Exit Function
     UDF_STR_HTMLDECODE = HTMLDecode(CStr(text)): Exit Function
 EH: UDF_STR_HTMLDECODE = CVErr(xlErrValue)
 End Function
@@ -2638,6 +2804,16 @@ Public Function UDF_STR_RANDOMSTRING( _
     On Error GoTo EH
     If IsObject(charset) Then If TypeOf charset Is Range Then charset = charset.Value
     If IsArray(charset) Then
+        ' 1D 数组支持 (R5-11): 探测维度 2, 若为 1D 则提升为单行 2D 后走统一映射
+        Err.Clear: On Error Resume Next
+        Dim d2p As Long: d2p = UBound(charset, 2)
+        If Err.Number <> 0 Then
+            Dim tx2() As Variant: ReDim tx2(1 To 1, LBound(charset) To UBound(charset))
+            Dim kk As Long
+            For kk = LBound(charset) To UBound(charset): tx2(1, kk) = charset(kk): Next kk
+            charset = tx2
+        End If
+        On Error GoTo EH
         ReDim resultArr(LBound(charset,1) To UBound(charset,1), LBound(charset,2) To UBound(charset,2))
         For i = LBound(charset,1) To UBound(charset,1)
             For j = LBound(charset,2) To UBound(charset,2)

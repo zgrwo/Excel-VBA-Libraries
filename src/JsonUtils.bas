@@ -24,6 +24,8 @@ Private DP As New DictProxy
 '   5. 完整 Unicode — 支持代理对 (Surrogate Pairs)，正确解析 Emoji/生僻字
 '   6. 快速路径 — 无转义字符串直接 Mid$ 截取，无 Join 拼接开销
 '   7. 重复键覆盖 — dict.Add 替代 dict(key)=val，兼容对象值
+'   8. 深度保护 — 解析嵌套上限 MAX_JSON_DEPTH=128 层 (VBA 实测约 220 层
+'      即 Error 28 溢出栈空间)；超限统一报 ERR_INVALID_JSON
 '
 ' 工作表函数 (UDF_JSON_*):
 '   UDF_JSON_GET       — 按路径提取值 (对象/数组返回占位文本)
@@ -47,7 +49,8 @@ Private Const ERR_FORMULA_RANGE As Long = vbObjectError + 1304
 Private Const ERR_INVALID_INPUT As Long = vbObjectError + 1001
 
 ' --- 递归深度保护 ---
-Private Const MAX_JSON_DEPTH As Long = 512
+' 128 为 VBA 递归栈实测安全值 (约 220 层即 Error 28“溢出堆栈空间”)
+Private Const MAX_JSON_DEPTH As Long = 128
 
 ' --- 解析状态 (UDT，全部状态封装在 UDT 中，消除模块级变量) ---
 Private Type TJsonState
@@ -370,7 +373,7 @@ Private Function ParseNumber(ByRef st As TJsonState) As Variant
         hasDigit = True
     Else
         Do While st.pos <= st.textLen
-            d = AscW(Mid$(st.jsonText, st.pos, 1)) - 48
+            d = (AscW(Mid$(st.jsonText, st.pos, 1)) And &HFFFF&) - 48
             If d >= 0 And d <= 9 Then
                 ReadChar st
                 hasDigit = True
@@ -388,7 +391,7 @@ Private Function ParseNumber(ByRef st As TJsonState) As Variant
         ReadChar st
         hasFrac = False
         Do While st.pos <= st.textLen
-            d = AscW(Mid$(st.jsonText, st.pos, 1)) - 48
+            d = (AscW(Mid$(st.jsonText, st.pos, 1)) And &HFFFF&) - 48
             If d >= 0 And d <= 9 Then
                 ReadChar st
                 hasFrac = True
@@ -407,7 +410,7 @@ Private Function ParseNumber(ByRef st As TJsonState) As Variant
         If PeekChar(st) = "+" Or PeekChar(st) = "-" Then ReadChar st
         hasExp = False
         Do While st.pos <= st.textLen
-            d = AscW(Mid$(st.jsonText, st.pos, 1)) - 48
+            d = (AscW(Mid$(st.jsonText, st.pos, 1)) And &HFFFF&) - 48
             If d >= 0 And d <= 9 Then
                 ReadChar st
                 hasExp = True
@@ -459,12 +462,28 @@ Private Function ParseNumber(ByRef st As TJsonState) As Variant
             On Error GoTo 0
         End If
     ElseIf InStr(numStr, ".") > 0 Then
+        ' R5-17: 超长数字字面量使 Val 抛裸 Error 6 (溢出) — 转模块错误
+        On Error Resume Next
         ParseNumber = Val(numStr)
+        If Err.Number <> 0 Then
+            Err.Clear: On Error GoTo 0
+            Err.Raise ERR_INVALID_JSON, "JsonUtils", _
+                "JSON 数字超出 Double 范围: " & numStr
+        End If
+        On Error GoTo 0
     Else
         ' 用数值边界取代长度判断，避免 CLng 溢出
         ' (10位十进制数可能远超 Long.MaxValue = 2,147,483,647)
         Dim dVal As Double
+        ' R5-17: Val 对超长整数 (>Double 范围) 抛 Error 6 — 转模块错误
+        On Error Resume Next
         dVal = Val(numStr)
+        If Err.Number <> 0 Then
+            Err.Clear: On Error GoTo 0
+            Err.Raise ERR_INVALID_JSON, "JsonUtils", _
+                "JSON 数字超出 Double 范围: " & numStr
+        End If
+        On Error GoTo 0
         If dVal >= -2147483648# And dVal <= 2147483647# Then
             ParseNumber = CLng(dVal)
         Else
@@ -518,7 +537,10 @@ Public Function JsonParse(ByVal json As String) As Variant
     st.pos = 1
     st.textLen = Len(json)
 
+    ' R5-18: VBA 递归栈溢出 (Error 28) 统一转 ERR_INVALID_JSON
+    On Error GoTo DepthEH
     ParseValue st, result
+    On Error GoTo 0
 
     SkipWhitespace st
     If st.pos <= st.textLen Then
@@ -528,6 +550,14 @@ Public Function JsonParse(ByVal json As String) As Variant
 
     ' Inline: function return needs direct Set/Let (VarLetSet fails for arrays)
     If IsObject(result) Then Set JsonParse = result Else JsonParse = result
+    Exit Function
+
+DepthEH:
+    If Err.Number = 28 Then
+        Err.Raise ERR_INVALID_JSON, "JsonUtils", _
+            "JSON 嵌套超过递归深度限制 (" & MAX_JSON_DEPTH & " 层)"
+    End If
+    Err.Raise Err.Number, "JsonUtils", Err.Description
 End Function
 
 ' JsonGet — 按路径提取值
@@ -547,17 +577,19 @@ Public Function JsonGet(ByVal json As Variant, ByVal path As Variant) As Variant
     End If
     If IsArray(json) Then
         Dim firstCell As Variant
-        On Error Resume Next
+        Err.Clear: On Error Resume Next
         firstCell = json(LBound(json, 1), LBound(json, 2))
         If Err.Number <> 0 Then
             Err.Clear: On Error GoTo 0
-            Err.Raise ERR_INVALID_JSON, "JsonUtils", _
-                "JSON 输入是数组 — 请传入 JSON 字符串或已解析的 Dictionary。"
+            ' 1D 数组 → 已解析的 JSON 数组根 (R5-48: 支持 "[0]" 路径)
+            VarLetSet current, json
+        Else
+            On Error GoTo 0
+            ' 2D 数组 (Range.Value) → 取首单元格文本
+            json = firstCell
         End If
-        On Error GoTo 0
-        json = firstCell
     End If
-    If Not IsObject(current) Then
+    If Not IsObject(current) And Not IsArray(current) Then
         VarLetSet current, JsonParse(CStr(json))
     End If
     Dim p       As Long
@@ -799,10 +831,13 @@ Public Function JsonIsValid(ByVal json As Variant) As Boolean
         If TypeOf json Is Range Then json = json.Value
     End If
     If Len(CStr(json)) = 0 Then Exit Function
-    Err.Clear: On Error Resume Next
+    ' R5-18: Error 28 (递归过深) 亦由本处理器捕获, 统一视为非法
+    On Error GoTo EH
     JsonParse CStr(json)
-    JsonIsValid = (Err.Number = 0)
-    On Error GoTo 0
+    JsonIsValid = True
+    Exit Function
+EH:
+    JsonIsValid = False
 End Function
 
 '=====================================================================
@@ -824,6 +859,25 @@ Public Function JsonStringify(ByVal value As Variant) As String
         If TypeOf value Is Range Then value = value.Value
     End If
     JsonStringify = StringifyValue(value, 0)
+End Function
+
+' JsonNumberLiteral — Double → JSON 数字字面量 (R5-03: |d|<1 补前导 0)
+Private Function JsonNumberLiteral(ByVal d As Double) As String
+    Dim s As String
+    If Abs(d) <= 2147483647# Then
+        If d = CLng(d) Then
+            JsonNumberLiteral = CStr(CLng(d))
+            Exit Function
+        End If
+    End If
+    ' Str$ 对 |d|<1 省略整数位 0 (" .5" → ".5") — 补零保证合法 JSON
+    s = Replace$(LTrim$(Str$(d)), ",", ".")
+    If Left$(s, 1) = "." Then
+        s = "0" & s
+    ElseIf Left$(s, 2) = "-." Then
+        s = "-0" & Mid$(s, 2)
+    End If
+    JsonNumberLiteral = s
 End Function
 
 ' StringifyValue — 递归序列化核心 (Private)
@@ -859,6 +913,17 @@ Private Function StringifyValue(ByVal v As Variant, Optional ByVal depth As Long
     End If
 
     If IsArray(v) Then
+        ' R5-34: 未分配数组 (Dim a()) → "[]", 不能直接 LBound (Error 9)
+        Dim lbProbe As Long
+        Err.Clear: On Error Resume Next
+        lbProbe = LBound(v)
+        If Err.Number <> 0 Then
+            Err.Clear: On Error GoTo 0
+            StringifyValue = "[]"
+            Exit Function
+        End If
+        On Error GoTo 0
+
         ' Detect dimensions: try UBound on dim 2 (§9.3: Err.Clear 前置清理上游残留)
         Dim is2D As Boolean
         Err.Clear: On Error Resume Next
@@ -921,17 +986,7 @@ Private Function StringifyValue(ByVal v As Variant, Optional ByVal depth As Long
         StringifyValue = """" & Format$(v, "yyyy-mm-dd\Thh:nn:ss") & """": Exit Function
     End If
     If VarType(v) <> vbString And IsNumeric(v) Then
-        Dim d As Double: d = CDbl(v)
-        ' 整数在 Long 范围内输出无小数点
-        If Abs(d) <= 2147483647# Then
-            If d = CLng(d) Then
-                StringifyValue = CStr(CLng(d))
-            Else
-                StringifyValue = Replace$(LTrim$(Str$(d)), ",", ".")
-            End If
-        Else
-            StringifyValue = Replace$(LTrim$(Str$(d)), ",", ".")
-        End If
+        StringifyValue = JsonNumberLiteral(CDbl(v))
         Exit Function
     End If
 

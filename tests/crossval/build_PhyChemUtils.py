@@ -88,6 +88,80 @@ def _py_molecular_weight(formula: str) -> float:
 
 
 # =============================================================================
+# R5 probes (Boolean/Empty 字面量必须在 VBA 内部构造)
+# =============================================================================
+
+# src/PhyChemUtils.bas:58 — ERR_INVALID_INPUT = vbObjectError + 1000
+PC_ERR_INVALID_INPUT = float(-2147221504 + 1000)
+
+PC_R5_PROBE_VBA = r"""
+Option Explicit
+
+Public Function ProbeR5(ByVal which As String) As Double
+    On Error GoTo EH
+
+    Dim v As Variant
+
+    ' ---- R5-35: 核心路径 Boolean/非数值已知项必须报 ERR_INVALID_INPUT ----
+    If which = "dil_bool" Then
+        v = DilutionSolve(True, 10, Empty, 5)
+    ElseIf which = "ig_bool" Then
+        v = IdealGasLaw(True, 1, Empty, 300)
+    ElseIf which = "den_bool" Then
+        v = Density(True, 5, Empty)
+    ElseIf which = "dil_str" Then
+        v = DilutionSolve("abc", 10, Empty, 5)
+
+    ' ---- R5-35: 合法输入不变 ----
+    ElseIf which = "dil_valid" Then
+        ProbeR5 = DilutionSolve(2, 10, Empty, 5)
+        Exit Function
+
+    ' ---- R5-35: UDF 包装层 Boolean → CVErr(xlErrValue) (返回 1) ----
+    ElseIf which = "udf_dil_bool" Then
+        v = UDF_PC_DILUTION(True, 10, Empty, 5)
+        If CStr(v) = CStr(CVErr(xlErrValue)) Then ProbeR5 = 1 Else ProbeR5 = 0
+        Exit Function
+    ElseIf which = "udf_den_bool" Then
+        v = UDF_PC_DENSITY(True, 5, Empty)
+        If CStr(v) = CStr(CVErr(xlErrValue)) Then ProbeR5 = 1 Else ProbeR5 = 0
+        Exit Function
+    ElseIf which = "udf_ig_bool" Then
+        v = UDF_PC_IDEALGASLAW(True, 1, Empty, 300)
+        If CStr(v) = CStr(CVErr(xlErrValue)) Then ProbeR5 = 1 Else ProbeR5 = 0
+        Exit Function
+
+    Else
+        ProbeR5 = -999
+        Exit Function
+    End If
+
+    ProbeR5 = 0
+    Exit Function
+EH:
+    ProbeR5 = Err.Number
+End Function
+"""
+
+
+def _pc_r5_probe(excel, wb, ws, runner, tc, args):
+    """R5-35 探针: 返回 Err.Number / 计算结果, 错误不穿透 COM。"""
+    from tests.test_utils import run_macro
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == "PcR5Probe":
+            vbproj.VBComponents.Remove(comp)
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = "PcR5Probe"
+    comp.CodeModule.AddFromString(
+        PC_R5_PROBE_VBA.replace("\r\n", "\n").replace("\n", "\r\n"))
+    val = run_macro(excel, wb, "PcR5Probe.ProbeR5", args[0])
+    expected = float(args[1])
+    tol = float(args[2]) if len(args) > 2 else 0.0
+    return float(val), expected, tol
+
+
+# =============================================================================
 # Test Cases
 # =============================================================================
 
@@ -401,6 +475,33 @@ TEST_CASES = [
 
 ]
 
+
+# =====================================================================
+# 第五轮审查回归 (2026-09-13): R5-35
+# =====================================================================
+TEST_CASES += [
+    # 核心路径: Boolean/非数值已知项报 ERR_INVALID_INPUT(-2147220504)
+    {"name": "R5_35_DilutionSolve_boolean", "func": "DilutionSolve",
+     "args": lambda: ("dil_bool", PC_ERR_INVALID_INPUT), "reconstruct": _pc_r5_probe},
+    {"name": "R5_35_IdealGasLaw_boolean", "func": "IdealGasLaw",
+     "args": lambda: ("ig_bool", PC_ERR_INVALID_INPUT), "reconstruct": _pc_r5_probe},
+    {"name": "R5_35_Density_boolean", "func": "Density",
+     "args": lambda: ("den_bool", PC_ERR_INVALID_INPUT), "reconstruct": _pc_r5_probe},
+    {"name": "R5_35_DilutionSolve_nonnumeric_string", "func": "DilutionSolve",
+     "args": lambda: ("dil_str", PC_ERR_INVALID_INPUT), "reconstruct": _pc_r5_probe},
+
+    # 合法输入行为不变: DilutionSolve(2,10,Empty,5) = 4
+    {"name": "R5_35_DilutionSolve_valid_unchanged", "func": "DilutionSolve",
+     "args": lambda: ("dil_valid", 4.0, 1e-10), "reconstruct": _pc_r5_probe},
+
+    # UDF 包装层: Boolean → CVErr (返回 1)
+    {"name": "R5_35_UDF_Dilution_boolean", "func": "UDF_PC_DILUTION",
+     "args": lambda: ("udf_dil_bool", 1.0), "reconstruct": _pc_r5_probe},
+    {"name": "R5_35_UDF_Density_boolean", "func": "UDF_PC_DENSITY",
+     "args": lambda: ("udf_den_bool", 1.0), "reconstruct": _pc_r5_probe},
+    {"name": "R5_35_UDF_IdealGasLaw_boolean", "func": "UDF_PC_IDEALGASLAW",
+     "args": lambda: ("udf_ig_bool", 1.0), "reconstruct": _pc_r5_probe},
+]
 
 
 def _py_convert_standard(V, P, T, MW):

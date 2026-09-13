@@ -21,6 +21,41 @@ ID2 = np.eye(2); ID3 = np.eye(3)
 MAT_2X2 = np.array([[1., 2.], [3., 4.]])
 MAT_3X2 = np.array([[1., 2.], [3., 4.], [5., 6.]])
 
+# 内部错误码常量 (src/LinearUtils.bas:48-49)
+VB_OBJECT_ERROR = -2147221504
+ERR_INVALID_INPUT = float(VB_OBJECT_ERROR + 1001)
+# src/LinearUtils.bas:47 MAX_DOUBLE 字面量
+MAX_DOUBLE_LITERAL = float("1.79769313486231E+308")
+
+VBA_R5_PROBE = r"""
+Option Explicit
+Public Function Probe(ByVal which As String) As Double
+    On Error GoTo EH
+    Dim v As Variant
+    Dim m(1 To 2, 1 To 2) As Variant
+    If which = "polyfit_string" Then
+        v = PolyFit(Array(1#, 2#, "abc", 4#), Array(1#, 2#, 3#, 4#), 1)
+    ElseIf which = "polyfit_bool" Then
+        v = PolyFit(Array(1#, 2#, True, 4#), Array(1#, 2#, 3#, 4#), 1)
+    ElseIf which = "polyfit_empty" Then
+        v = PolyFit(Array(1#, 2#, Empty, 4#), Array(1#, 2#, 3#, 4#), 1)
+    ElseIf which = "todouble_string" Then
+        m(1, 1) = 1#: m(1, 2) = 2#: m(2, 1) = 3#: m(2, 2) = "abc"
+        v = MatrixDeterminant(m)
+    ElseIf which = "todouble_error" Then
+        m(1, 1) = 1#: m(1, 2) = 2#: m(2, 1) = 3#: m(2, 2) = CVErr(xlErrDiv0)
+        v = MatrixDeterminant(m)
+    Else
+        Probe = -999
+        Exit Function
+    End If
+    Probe = 0
+    Exit Function
+EH:
+    Probe = Err.Number
+End Function
+"""
+
 def _spd(n):
     A = RNG.standard_normal((n, n))
     return A @ A.T + n * np.eye(n)
@@ -59,6 +94,85 @@ def _eigen_symmetrize_probe(excel, wb, ws, runner, tc, args):
                                       (A.tolist(),)))
     d = np.diag(D) if D.ndim == 2 else D
     return float(np.min(np.abs(d))), 0.0, 1e-9
+
+
+# =============================================================================
+# 2026-09-13 R5 回归探针
+# =============================================================================
+
+def _polyfit_tiny_scale_probe(excel, wb, ws, runner, tc, args):
+    """R5-04 回归: x≈1e-14 尺度不得被绝对阈值误判秩亏 (斜率静默 0)。
+
+    修复前 slope=0/intercept=3。以 numpy.polyfit 为参考,
+    返回系数尺度归一的相对误差 (尺度感知)。
+    """
+    x = np.array(args[0], dtype=float)
+    y = np.array(args[1], dtype=float)
+    degree = args[2]
+    vba = np.ravel(com_to_numpy(runner._call_vba(
+        excel, wb, {"func": "PolyFit"}, (x.tolist(), y.tolist(), degree))))
+    ref = np.polyfit(x, y, degree)
+    err = float(np.max(np.abs(vba - ref) / np.maximum(1.0, np.abs(ref))))
+    return err, 0.0, 1e-8
+
+
+def _qr_extreme_scale_probe(excel, wb, ws, runner, tc, args):
+    """R5-15 回归: 极端量级 QR 不得上溢 Error 6 / 下溢静默错误。
+
+    以 Q·R = A 为参考, 返回按 max|A| 归一的相对重构误差 (尺度感知)。
+    """
+    A = np.array(args[0], dtype=float)
+    q = com_to_numpy(runner._call_udf(
+        excel, wb, ws, {"func": "UDF_LINALG_QR_Q"}, (A.tolist(),)))
+    r = com_to_numpy(runner._call_udf(
+        excel, wb, ws, {"func": "UDF_LINALG_QR_R"}, (A.tolist(),)))
+    err = float(np.max(np.abs(q @ r - A)) / np.max(np.abs(A)))
+    return err, 0.0, 1e-10
+
+
+def _solve_tiny_scale_probe(excel, wb, ws, runner, tc, args):
+    """R5-15 回归: 1e-170 超定系统 — QR 下溢时回代矩阵非上三角, 解错误。
+
+    以 numpy.linalg.lstsq 为参考, 返回按解尺度归一的相对误差。
+    """
+    A = np.array(args[0], dtype=float)
+    b = np.array(args[1], dtype=float)
+    vba = np.ravel(com_to_numpy(runner._call_vba(
+        excel, wb, {"func": "SolveLinearSystem"}, (A.tolist(), b.tolist()))))
+    ref = np.linalg.lstsq(A, b, rcond=None)[0]
+    err = float(np.max(np.abs(vba - ref)) / max(1.0, float(np.max(np.abs(ref)))))
+    return err, 0.0, 1e-8
+
+
+def _cond_number_r5_probe(excel, wb, ws, runner, tc, args):
+    """R5-16 回归: 条件数按机器精度判秩 (numpy.linalg.cond 参考);
+    负 tol 走 auto 且奇异矩阵返回 MAX_DOUBLE (修复前抛裸 Error 11)。
+    """
+    A = np.array(args[0], dtype=float)
+    tol_arg = args[1]
+    mode = args[2]
+    v = float(runner._call_vba(excel, wb, {"func": "MatrixConditionNumber"},
+                               (A.tolist(), tol_arg)))
+    if mode == "finite":
+        ref = float(np.linalg.cond(A))
+    else:
+        ref = MAX_DOUBLE_LITERAL
+    return abs(v - ref) / ref, 0.0, 1e-8
+
+
+def _linear_r5_probe(excel, wb, ws, runner, tc, args):
+    """R5-14/R5-32 负例探针: VBA 内部捕获 Err.Number (错误码不跨 COM)。"""
+    from tests.test_utils import run_macro
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == "LinearR5Probe":
+            vbproj.VBComponents.Remove(comp)
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = "LinearR5Probe"
+    comp.CodeModule.AddFromString(
+        VBA_R5_PROBE.replace("\r\n", "\n").replace("\n", "\r\n"))
+    val = run_macro(excel, wb, "LinearR5Probe.Probe", args[0])
+    return float(val), float(args[1]), float(args[2]) if len(args) > 2 else 0.0
 
 
 def _reconstruct_decomp(excel, wb, ws, runner, func_a, func_b, func_c, A, mode):
@@ -492,6 +606,53 @@ TEST_CASES = [
     {"name": "Eigen_Symmetrize_MixedScale", "func": "Eigen_Symmetrize_MixedScale",
      "args": lambda: ([[1e16, 0., 0.], [0., 0., -1.], [0., 1., 0.]],),
      "reconstruct": _eigen_symmetrize_probe, "py_ref": lambda a: 0.0},
+
+    # =====================================================================
+    # ---- 2026-09-13 R5-04/R5-14/R5-15/R5-16/R5-32 回归 ----
+    # =====================================================================
+    # R5-04: 小尺度 x (1e-14) 不得误判秩亏 — numpy.polyfit 参考
+    {"name": "PolyFit_tiny_scale_1e-14", "func": "PolyFit",
+     "args": lambda: ([1e-14, 2e-14, 3e-14, 4e-14, 5e-14], [1, 2, 3, 4, 5], 1),
+     "reconstruct": _polyfit_tiny_scale_probe, "py_ref": lambda a: 0.0},
+    # R5-14: 数组路径非数值/Boolean/Empty 必须 ERR_INVALID_INPUT (+1001)
+    {"name": "PolyFit_array_string_err", "func": "PolyFit",
+     "args": lambda: ("polyfit_string", ERR_INVALID_INPUT),
+     "reconstruct": _linear_r5_probe, "py_ref": lambda a: ERR_INVALID_INPUT},
+    {"name": "PolyFit_array_bool_err", "func": "PolyFit",
+     "args": lambda: ("polyfit_bool", ERR_INVALID_INPUT),
+     "reconstruct": _linear_r5_probe, "py_ref": lambda a: ERR_INVALID_INPUT},
+    {"name": "PolyFit_array_empty_err", "func": "PolyFit",
+     "args": lambda: ("polyfit_empty", ERR_INVALID_INPUT),
+     "reconstruct": _linear_r5_probe, "py_ref": lambda a: ERR_INVALID_INPUT},
+    # R5-15: 极端量级 QR — 1e154 不得上溢 Error 6; 1e-170 不得下溢
+    {"name": "QR_extreme_scale_huge_recon", "func": "QR_extreme_scale_huge_recon",
+     "args": lambda: ([[1e154, 0.0], [0.0, 1.0]],),
+     "reconstruct": _qr_extreme_scale_probe, "py_ref": lambda a: 0.0},
+    {"name": "QR_extreme_scale_huge_reflect_recon", "func": "QR_extreme_scale_huge_reflect_recon",
+     "args": lambda: ([[1e154, 1e154], [1e154, 0.0]],),
+     "reconstruct": _qr_extreme_scale_probe, "py_ref": lambda a: 0.0},
+    {"name": "QR_extreme_scale_tiny_recon", "func": "QR_extreme_scale_tiny_recon",
+     "args": lambda: ([[3e-170, 1e-170], [1e-170, 2e-170]],),
+     "reconstruct": _qr_extreme_scale_probe, "py_ref": lambda a: 0.0},
+    # R5-15: 1e-170 超定最小二乘 — 下溢时回代矩阵非上三角, 解错误
+    {"name": "Solve_tiny_scale_1e-170", "func": "Solve_tiny_scale_1e-170",
+     "args": lambda: ([[3e-170, 1e-170], [1e-170, 2e-170], [1e-170, 1e-170]],
+                      [5e-170, 4e-170, 3e-170]),
+     "reconstruct": _solve_tiny_scale_probe, "py_ref": lambda a: 0.0},
+    # R5-16: diag(1,1e-15) → 1e15 (numpy cond 参考); 负 tol 不得抛裸 Error 11
+    {"name": "MatrixConditionNumber_1e15", "func": "MatrixConditionNumber",
+     "args": lambda: ([[1.0, 0.0], [0.0, 1e-15]], 1e-14, "finite"),
+     "reconstruct": _cond_number_r5_probe, "py_ref": lambda a: 0.0},
+    {"name": "MatrixConditionNumber_neg_tol_auto", "func": "MatrixConditionNumber",
+     "args": lambda: ([[1.0, 2.0], [2.0, 4.0]], -1.0, "maxdouble"),
+     "reconstruct": _cond_number_r5_probe, "py_ref": lambda a: 0.0},
+    # R5-32: ToDoubleMatrix 非数值/错误值 → ERR_INVALID_INPUT, 不得裸 Error 13
+    {"name": "MatrixDeterminant_non_numeric_err", "func": "MatrixDeterminant",
+     "args": lambda: ("todouble_string", ERR_INVALID_INPUT),
+     "reconstruct": _linear_r5_probe, "py_ref": lambda a: ERR_INVALID_INPUT},
+    {"name": "MatrixDeterminant_error_value_err", "func": "MatrixDeterminant",
+     "args": lambda: ("todouble_error", ERR_INVALID_INPUT),
+     "reconstruct": _linear_r5_probe, "py_ref": lambda a: ERR_INVALID_INPUT},
 
 ]
 

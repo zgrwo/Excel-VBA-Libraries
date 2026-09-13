@@ -1792,7 +1792,7 @@ SQL queries on Excel worksheets via ADODB (ACE/Jet OLEDB). Supports SELECT/JOIN/
 
 #### SqlExecute
 
-Execute any SQL statement, returns 2D Variant array (includes column name header row). **VBA-only** (indicates success/failure via outOk parameter).
+Execute any SQL statement, returns 2D Variant array (includes column name header row). **VBA-only** (indicates success/failure via outOk parameter). Input/environment errors raise `Err.Raise`; SQL execution errors return an empty result with `outOk=False` (error text via `outErrorMsg`).
 
 **VBA Usage**
 ```vb
@@ -1864,7 +1864,7 @@ SqlGetConnection([filePath], outOk) As Object
 
 #### SqlRangeQuery
 
-Query a Range directly, no saved workbook needed. Uses ADODB Recordset in memory. Supports SELECT * and WHERE filter.
+Query a Range directly, no saved workbook needed. Uses ADODB Recordset in memory. Supports SELECT * and WHERE filter. WHERE runs via `Recordset.Filter`: `[`/`]` match literally and `IN`/`NOT IN`/`BETWEEN` are unsupported (unlike ACE SQL LIKE semantics); a single-cell Range input is returned as-is without parsing WHERE.
 
 **VBA Usage**
 ```vb
@@ -2042,7 +2042,11 @@ SqlListTables([filePath], outOk) As Variant()
 
 > **Environment Requirements**: SqlUtils depends on ADODB and ACE/Jet OLEDB providers. 64-bit Office requires Access Database Engine installation. If workbook is unsaved, use SqlRangeQuery to query a Range directly.
 >
-> **⚠️ SQL Injection Prevention**: ACE OLEDB Excel ISAM driver does not support parameterized queries. Use `SqlEscapeString()` to escape user-supplied cell values (`'` → `''`) before embedding them in WHERE/VALUES clauses: `=UDF_SQL_QUERY("SELECT * FROM [Sheet1$] WHERE Name = '" & SqlEscapeString(A1) & "'")`. Note: Error-valued cells (#N/A, #VALUE!, etc.) are silently converted to an empty string (to prevent `CStr` crashes) — upstream data containing errors may yield empty result sets; clean the data first.
+> **outOk Contract**: Input/environment errors (empty SQL, unsaved workbook, no active workbook, path containing `;`/`"`, missing/unopenable file, ADODB or provider unavailable) raise `Err.Raise`; SQL execution errors (syntax errors, missing tables/columns, etc.) do not raise — they return an empty result with `outOk=False` (`SqlExecute` also reports the error text via `outErrorMsg`).
+>
+> **⚠️ SQL Injection Prevention**: ACE OLEDB Excel ISAM driver does not support parameterized queries. Use `SqlEscapeString()` to escape user-supplied cell values (`'` → `''`) before embedding them in WHERE/VALUES clauses: `=UDF_SQL_QUERY("SELECT * FROM [Sheet1$] WHERE Name = '" & SqlEscapeString(A1) & "'")`. Note: Error-valued cells (#N/A, #VALUE!, etc.) are silently converted to an empty string (to prevent `CStr` crashes) — upstream data containing errors may yield empty result sets; clean the data first. For LIKE patterns use `SqlEscapeString(value, True)` (ACE bracket escaping: `%`→`[%]`, `_`→`[_]`, `[`→`[[]`).
+>
+> **LIKE Escaping Scope**: `SqlEscapeString(value, True)` bracket escaping is valid only for ACE/Jet SQL text paths (`SqlExecute`/`SqlQuery`/`SqlJoin`/`SqlGroupBy`). `SqlRangeQuery` runs its WHERE clause via ADODB `Recordset.Filter`, whose LIKE engine treats `[`/`]` as literals and does not support `IN`/`NOT IN`/`BETWEEN`; a single-cell Range input is returned as-is without applying WHERE (`tableAlias` is a placeholder only).
 >
 > **Naming Convention**: Worksheet names in SQL require a `$` suffix and square brackets, e.g. `[Sheet1$]`. Column names with special characters are auto-cleaned by SqlRangeQuery.
 ---
@@ -2182,7 +2186,7 @@ Ap = PseudoInverse(A)
 
 #### EigenSymmetric
 
-Symmetric matrix eigendecomposition A = V * D * V^T. Uses Jacobi rotation algorithm. Automatically checks symmetry; eigenvalues sorted descending.
+Symmetric matrix eigendecomposition A = V * D * V^T. Uses Jacobi rotation algorithm. Symmetry is checked with a scale-aware tolerance: inputs within tolerance are explicitly symmetrized as (A+Aᵀ)/2, otherwise an error is raised. Eigenvalues sorted descending.
 
 **VBA Usage**
 ```vb
@@ -2374,19 +2378,19 @@ F = MatrixHadamard(A, B)        ' A (Hadamard) B element-wise product
 
 #### QRDecomposition
 
-QR decomposition A = Q*R based on Householder reflections. Sub procedure, returns Q and R via ByRef.
+QR decomposition A = Q*R based on Householder reflections. Sub procedure, returns Q and R via ByRef. `economy=False` (default) returns full Q(m×m) and R(m×n); `economy=True` returns the standard reduced QR: Q=m×maxK, R=maxK×n (maxK=min(m,n)); for wide matrices (m<n) R keeps all n columns and Q·R=A reconstructs.
 
 **VBA Usage**
 ```vb
-QRDecomposition A, Q, R, True      ' Economy mode: Q(mxk), R(kxk)
+QRDecomposition A, Q, R, True      ' Economy (reduced): Q(m×maxK), R(maxK×n)
 ```
 
 | Parameter | Type | Description |
 |------|------|------|
 | A | Double(,) | input matrix |
 | Q | Double(,) | output: Orthogonal matrix (ByRef) |
-| R | Double(,) | output: upper triangular matrix (ByRef) |
-| economy | Boolean | Optional. Economy mode (defaults to True) |
+| R | Double(,) | output: upper triangular/trapezoidal matrix (ByRef) |
+| economy | Boolean | Optional. Economy mode (defaults to False) |
 
 **UDF Usage**
 ```
@@ -3432,6 +3436,8 @@ sweep = FactorSweep(model, 1, 100#, 140#, 11)
 
 String extraction, encoding conversion, format validation, edit distance, random generation, and text cleaning. **Module**: `StringUtils.bas`
 
+> **Error-Value Convention**: on scalar paths `UDF_STR_*` returns `#VALUE!` for Excel error values (#N/A, #DIV/0!, etc.); array paths keep the original error value element-wise. Exception: `UDF_STR_ISNULLOREMPTY` / `UDF_STR_ISNULLORWHITESPACE` treat error values as "empty" and return `TRUE`.
+
 **Quick Reference**
 
 | Function | Parameters | Description | Returns |
@@ -3893,7 +3899,7 @@ s = Truncate("Hello World", 8)  ' → "Hello..."
 <a id="isnullorwhitespace"></a>
 #### IsNullOrEmpty / IsNullOrWhitespace
 
-Empty/null value checks: IsNullOrEmpty checks Null/Empty/zero-length strings; IsNullOrWhitespace additionally rejects whitespace-only characters.
+Empty/null value checks: IsNullOrEmpty checks Null/Empty/zero-length strings; IsNullOrWhitespace additionally rejects whitespace-only characters. The UDF forms accept Range and 2D/1D arrays (returning a verdict per element).
 
 ```vb
 IsNullOrEmpty(value) As Boolean
@@ -4522,6 +4528,8 @@ ws.Range("A1").Resize(UBound(arr,1), UBound(arr,2)).Value = arr
 
 Date information extraction, workday calculations, Unix timestamp conversion, age, and holidays. **Module**: `DateTimeUtils.bas`
 
+> **Unified Date-Input Contract**: date parameters accept a date value, a date string, or an Excel serial number (1..2958465); blank/omitted means today; error values, Null, Boolean, invalid strings, or out-of-range serials raise an error (UDFs return `#VALUE!`). Plain numbers are interpreted as serials: `DaysInMonth(2024)` refers to 1905-07-16, so pass `DaysInMonth(2024, 2)` for the year. `DaysInYear` accepts a date and returns that year's day count (e.g. `DaysInYear("2024-02-15")` → 366), and `DaysInYear`/`IsLeapYear` also accept a plain year number; `DaysInMonth(9999, 12)` returns 31. `IsHoliday` accepts a scalar holiday (date/date string/serial/blank) as well as arrays/Range/Dictionary.
+
 **Quick Reference**
 
 | Function | Parameters | Description | Returns |
@@ -4641,7 +4649,7 @@ n = FiscalYear(#2025-12-15#, 7)         ' → 2026 (July start)
 ```
 
 > Single-argument `DaysInMonth(x)`: `x` may be a date, date string, or Excel serial number (plain numbers
-> are treated as serials, e.g. 2024 → 1905-07-15). With no argument it returns the current month's day count;
+> are treated as serials, e.g. 2024 → 1905-07-16). With no argument it returns the current month's day count;
 > invalid/out-of-range serials raise an error.
 
 **UDF Usage**
@@ -5557,7 +5565,7 @@ mw = MolecularWeight("CuSO4·5H2O")    ' → 249.69  (supports · and + hydrate 
 
 #### DilutionSolve
 
-C1 * V1 = C2 * V2 solver. Pass three of the four parameters; pass Empty (or leave blank/omit) for the parameter to solve for (0 is a valid value, not an unknown marker). Returns the solved value.
+C1 * V1 = C2 * V2 solver. Pass three of the four parameters; pass Empty (or leave blank/omit) for the parameter to solve for (0 is a valid value, not an unknown marker). Known values must be numeric — Boolean, text, etc. raise an error (UDF returns `#VALUE!`). Returns the solved value.
 
 **VBA Usage**
 ```vb
@@ -5600,7 +5608,7 @@ m = MolesToMass(2, 18.015)     ' → 36.03 (g H2O)
 
 #### Density
 
-Density solver: calculate the third quantity from any two known quantities among m/V/rho; pass Empty (or leave blank/omit) for the unknown.
+Density solver: calculate the third quantity from any two known quantities among m/V/rho; pass Empty (or leave blank/omit) for the unknown. Known values must be numeric — Boolean, text, etc. raise an error (UDF returns `#VALUE!`).
 
 ```vb
 Density(m, v, rho) As Double
@@ -5706,7 +5714,7 @@ result = ConvertStandard(0.01, 202650, 298.15, 28.01)
 
 #### IdealGasLaw
 
-PV = nRT solver. Pass three of the four parameters; pass Empty (or omit) the parameter to solve for. R = 8.314 J/(mol·K). **P in Pa, V in m³, T in K**.
+PV = nRT solver. Pass three of the four parameters; pass Empty (or omit) the parameter to solve for. Known values must be numeric — Boolean, text, etc. raise an error (UDF returns `#VALUE!`). R = 8.314 J/(mol·K). **P in Pa, V in m³, T in K**.
 
 ```vb
 IdealGasLaw(P, V, n, T) As Double

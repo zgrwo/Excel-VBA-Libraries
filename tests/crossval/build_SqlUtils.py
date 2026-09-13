@@ -30,6 +30,91 @@ SQL_TEST_DATA = [
 
 SQL_COLUMNS = ["ID", "Name", "Score"]
 
+# R5-05/R5-36 regression fixtures: WHERE keyword must be located outside string
+# literals / bracket identifiers; ORDER BY inside a WHERE literal is legal.
+R5_WHERE_DATA = [
+    ["ID", "Name"],
+    [1, "A"],
+    [2, "B"],
+    [3, "C"],
+    [4, "D"],
+    [5, "E"],
+]
+
+R5_ORDERBY_DATA = [
+    ["ID", "Name"],
+    [1, "ORDER BY x"],
+    [2, "B"],
+]
+
+# mode -> (fixture, expected data-row count after filtering)
+R5_WHERE_PROBE_CASES = {
+    "baseline": (R5_WHERE_DATA, 2.0),
+    "literal_where": (R5_WHERE_DATA, 2.0),
+    "bracket_table": (R5_WHERE_DATA, 2.0),
+    "where_paren": (R5_WHERE_DATA, 2.0),
+    "where_tab": (R5_WHERE_DATA, 2.0),
+    "order_by_literal": (R5_ORDERBY_DATA, 1.0),
+}
+
+# R5-27: SqlListColumns table-name normalization (plain / quoted / bracketed).
+R5_LISTCOL_CASES = [
+    ("plain_TestData", "TestData", ["ID", "Name", "Score"]),
+    ("quoted_TestData", "'TestData$'", ["ID", "Name", "Score"]),
+    ("bracketed_TestData", "[TestData$]", ["ID", "Name", "Score"]),
+    ("space_plain", "Data Sheet", ["Col A", "Col B"]),
+    ("space_quoted", "'Data Sheet$'", ["Col A", "Col B"]),
+    ("space_bracketed", "[Data Sheet$]", ["Col A", "Col B"]),
+]
+
+PROBE_MODULE_NAME = "SqlR5Probe"
+PROBE_LINES = [
+    "Option Explicit",
+    "",
+    "Public Function ProbeWhere(ByVal rng As Range, ByVal mode As String) As Double",
+    "    On Error GoTo EH",
+    "    Dim sqlText As String, res As Variant, ok As Boolean",
+    "    Select Case mode",
+    "        Case \"baseline\"",
+    "            sqlText = \"SELECT * FROM data WHERE ID > 3\"",
+    "        Case \"literal_where\"",
+    "            sqlText = \"SELECT 'WHERE' AS w FROM data WHERE ID > 3\"",
+    "        Case \"bracket_table\"",
+    "            sqlText = \"SELECT * FROM [DataWhere$] WHERE ID > 3\"",
+    "        Case \"where_paren\"",
+    "            sqlText = \"SELECT * FROM data WHERE(ID > 3)\"",
+    "        Case \"where_tab\"",
+    "            sqlText = \"SELECT * FROM data\" & vbTab & \"WHERE\" & vbTab & \"ID > 3\"",
+    "        Case \"order_by_literal\"",
+    "            sqlText = \"SELECT * FROM data WHERE Name = 'ORDER BY x'\"",
+    "        Case Else",
+    "            ProbeWhere = -999",
+    "            Exit Function",
+    "    End Select",
+    "    res = SqlRangeQuery(sqlText, rng, \"data\", ok)",
+    "    If Not ok Then",
+    "        ProbeWhere = -1",
+    "        Exit Function",
+    "    End If",
+    "    ProbeWhere = CDbl(UBound(res, 1) - 1)",
+    "    Exit Function",
+    "EH:",
+    "    ProbeWhere = -CDbl(Err.Number)",
+    "End Function",
+]
+
+
+def _ensure_probe_module(wb):
+    """Inject SqlR5Probe module (idempotent) for in-VBA error capture."""
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == PROBE_MODULE_NAME:
+            return
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = PROBE_MODULE_NAME
+    comp.CodeModule.AddFromString("\r\n".join(PROBE_LINES))
+
+
 
 def _py_list_sheets(args):
     """Expected sheets in the workbook (created by create_workbook)."""
@@ -54,6 +139,90 @@ def _py_query_select_filter(args):
 def _py_query_select_count(args):
     """SELECT COUNT(*) FROM [TestData$]"""
     return [[6]]
+
+
+def _r5_where_probe(excel, wb, ws, runner, tc, args):
+    """R5-05/R5-36: WHERE keyword parsing regression (errors captured in VBA).
+
+    Returns the number of data rows (header excluded). SqlRangeQuery errors
+    surface as negative Err.Number, so a bad parse/filter yields a mismatch
+    instead of an exception crossing the COM boundary.
+    """
+    from tests.test_utils import run_macro, write_range
+    mode = args[0]
+    data, expected = R5_WHERE_PROBE_CASES[mode]
+    probe_ws = _get_probe_sheet(wb)
+    probe_ws.UsedRange.ClearContents()
+    arr = np.asarray(data, dtype=object)
+    write_range(probe_ws, arr, 1, 1)
+    rng = probe_ws.Range(probe_ws.Cells(1, 1),
+                         probe_ws.Cells(arr.shape[0], arr.shape[1]))
+    val = run_macro(excel, wb, f"{PROBE_MODULE_NAME}.ProbeWhere", rng, mode)
+    return float(val), float(expected), 0.0
+
+
+def _get_probe_sheet(wb):
+    """Dedicated fixture sheet for the range-query probe (keeps TestData intact)."""
+    try:
+        return wb.Sheets("SqlR5Data")
+    except Exception:
+        probe_ws = wb.Sheets.Add()
+        probe_ws.Name = "SqlR5Data"
+        return probe_ws
+
+
+# R5-28 activation: previously all five cases were SKIP. These minimal cases run
+# without Excel formulas (direct VBA calls / in-VBA probe) and are persisted
+# regressions for R5-05, R5-26 (escape output), R5-27 and R5-36.
+R5_ACTIVE_CASES = [
+    # ---- SqlEscapeString outputs (plain / bracket / forLike) ----
+    {
+        "name": "SqlEscapeString_plain",
+        "func": "SqlEscapeString",
+        "args": lambda: ("O'Brien's",),
+        "py_ref": lambda a: "O''Brien''s",
+        "result_type": "string",
+    },
+    {
+        # forLike=False (默认): 方括号为字面量, 仅 '' 转义; forLike 分支见下例
+        "name": "SqlEscapeString_bracket_literal",
+        "func": "SqlEscapeString",
+        "args": lambda: ("a[b]",),
+        "py_ref": lambda a: "a[b]",
+        "result_type": "string",
+    },
+    {
+        "name": "SqlEscapeString_forLike",
+        "func": "SqlEscapeString",
+        "args": lambda: ("100%_x[", True),
+        "py_ref": lambda a: "100[%][_]x[[]",
+        "result_type": "string",
+    },
+]
+
+# ---- SqlListColumns: plain / quoted / bracketed / spaced table names (R5-27) ----
+R5_ACTIVE_CASES += [
+    {
+        "name": f"SqlListColumns_{name}",
+        "func": "SqlListColumns",
+        "args": lambda a=arg: (a,),
+        "py_ref": lambda a, cols=cols: cols,
+        "compare_mode": "contains",
+    }
+    for name, arg, cols in R5_LISTCOL_CASES
+]
+
+# ---- SqlRangeQuery WHERE keyword boundaries (R5-05) / ORDER BY literal (R5-36) ----
+R5_ACTIVE_CASES += [
+    {
+        "name": f"SqlRangeQuery_where_{mode}",
+        "func": "SqlRangeQuery",
+        "args": lambda m=mode: (m,),
+        "reconstruct": _r5_where_probe,
+        "py_ref": lambda a, m=mode: R5_WHERE_PROBE_CASES[m][1],
+    }
+    for mode in R5_WHERE_PROBE_CASES
+]
 
 
 TEST_CASES = [
@@ -115,7 +284,7 @@ TEST_CASES = [
         "skip_if": True,
         "skip_reason": "COUNT result structure varies through COM; VBA Test_SqlUtils covers this",
     },
-]
+] + R5_ACTIVE_CASES
 
 
 def _flatten_sort(v):
@@ -156,6 +325,7 @@ class SqlUtilsRunner(CrossValRunner):
                 import_order=self._import_order,
             )
             inject_testrunner(wb)
+            _ensure_probe_module(wb)
 
             # Write SQL test data to TestData sheet
             td = wb.Sheets("TestData")
@@ -163,6 +333,12 @@ class SqlUtilsRunner(CrossValRunner):
                 td.Cells(1, j + 1).Value = col_name
             arr = np.asarray(SQL_TEST_DATA, dtype=object)
             write_range(td, arr, 2, 1)
+
+            # R5-27 fixture: sheet name with a space (ACE OpenSchema → 'Data Sheet$')
+            sd = wb.Sheets.Add()
+            sd.Name = "Data Sheet"
+            sd.Cells(1, 1).Value = "Col A"
+            sd.Cells(1, 2).Value = "Col B"
             wb.Save()
 
             self.results = []
@@ -190,6 +366,13 @@ class SqlUtilsRunner(CrossValRunner):
 
             # Convert datetime args to ISO strings
             args = tuple(self._to_com_arg(a) for a in args)
+
+            if tc.get("reconstruct"):
+                # In-VBA probe: multi-step call + VBA-side error capture
+                vba_result, py_val, tol = tc["reconstruct"](
+                    excel, wb, ws, self, tc, args)
+                self._compare_scalar(label, vba_result, py_val, tol)
+                return
 
             if tc.get("is_udf"):
                 vba_result = self._call_udf(excel, wb, ws, tc, args)

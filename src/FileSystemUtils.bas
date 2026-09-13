@@ -493,7 +493,7 @@ Public Sub WriteTextFile( _
     Select Case UCase$(encoding)
         Case "UTF-8"
             If append And FileExists(filePath) Then
-                WriteUTF8Append filePath, content
+                WriteUTF8Append filePath, content, bom
             Else
                 WriteUTF8 filePath, content, bom
             End If
@@ -576,7 +576,7 @@ End Sub
 
 ' 注: ADODB.Stream 追加需加载整个文件再重写 (读取-修改-写入)
 ' 大文件 (>100MB) 会消耗大量内存，建议用 WriteANSI 追加或分批写入
-Private Sub WriteUTF8Append(ByVal filePath As String, ByVal content As String)
+Private Sub WriteUTF8Append(ByVal filePath As String, ByVal content As String, ByVal bom As Boolean)
     Dim stream As Object
     Dim errNum As Long, errSrc As String, errDesc As String
     Dim i As Long
@@ -593,6 +593,8 @@ Private Sub WriteUTF8Append(ByVal filePath As String, ByVal content As String)
     stream.SaveToFile filePath, 2  ' adSaveCreateOverWrite (覆盖写入)
     stream.Close
     Set stream = Nothing
+    ' R5-45: ADODB 对 UTF-8 文本流始终写 BOM; bom=False 时二进制剥离
+    If Not bom Then StripBOMFile filePath
     Exit Sub
 
 ErrHandler:
@@ -687,6 +689,7 @@ Public Function ListFiles( _
     Dim cnt As Long
     Dim files As Object
     Dim file As Object
+    Dim enumErr As Long, enumDesc As String
 
     If Len(folder) = 0 Or Len(pattern) = 0 Then
         result = Array()
@@ -732,7 +735,13 @@ Public Function ListFiles( _
                     cnt = cnt + 1
                 End If
             Next file
+            ' R5-47: 枚举错误不再静默吞没 — 保存后在过程末尾重抛 (对齐 CollectFiles)
+            If Err.Number <> 0 Then
+                enumErr = Err.Number: enumDesc = Err.Description
+                Err.Clear
+            End If
             On Error GoTo 0
+            If enumErr <> 0 Then Err.Raise enumErr, "ListFiles", enumDesc
             If cnt > 0 Then
                 ReDim Preserve result(0 To cnt - 1)
             Else
@@ -1298,7 +1307,14 @@ Public Function ReadBinaryFile(ByVal filePath As String, Optional ByRef outOk As
         stream.Type = 1 ' binary
         stream.Open
         stream.LoadFromFile filePath
-        result = stream.Read
+        If stream.Size = 0 Then
+            ' R5-46: 空文件返回空 Byte()。VBA 无法本地创建零长度类型数组
+            ' (ReDim(0 To 0) 为 1 元素; ReDim(0 To -1) 抛 Error 9), 故返回
+            ' 未分配数组; 调用方须用 VariantKit.IsEmptyArray 探测, 不得裸 UBound。
+            Erase result
+        Else
+            result = stream.Read
+        End If
         stream.Close
         Set stream = Nothing
         On Error GoTo 0
@@ -1322,6 +1338,9 @@ StreamErrHandler:
     If fileLen > 0 Then
         ReDim result(0 To fileLen - 1)
         Get #fNum, 1, result
+    Else
+        ' R5-46: 空文件返回空 Byte() (未分配 — 调用方用 IsEmptyArray 探测)
+        Erase result
     End If
     Close #fNum
     outOk = True

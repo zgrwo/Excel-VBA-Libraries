@@ -434,6 +434,13 @@ Private Function IsUnknown(ByVal v As Variant) As Boolean
     IsUnknown = IsMissing(v) Or IsEmpty(v) Or IsNull(v)
 End Function
 
+' 校验已知项必须为数值且非 Boolean (R5-35: True/False 不得经 CDbl(-1/0) 静默入算)
+Private Sub EnsureNumericKnown(ByVal v As Variant, ByVal argName As String, ByVal funcName As String)
+    If VarType(v) = vbBoolean Or Not IsNumeric(v) Then
+        Err.Raise ERR_INVALID_INPUT, funcName, argName & " 必须为数值, 实际为 " & TypeName(v) & "。"
+    End If
+End Sub
+
 Public Function DilutionSolve(ByVal c1 As Variant, ByVal v1 As Variant, _
                               Optional ByVal c2 As Variant, _
                               Optional ByVal v2 As Variant) As Variant
@@ -451,6 +458,12 @@ Public Function DilutionSolve(ByVal c1 As Variant, ByVal v1 As Variant, _
         Err.Raise ERR_INVALID_INPUT, "DilutionSolve", _
             "必须恰好有一个未知参数 (传入 Empty)，当前未知数: " & unknowns & "。"
     End If
+
+    ' R5-35: 已知项类型校验 (Boolean/非数值不得静默入算)
+    If Not IsUnknown(c1) Then EnsureNumericKnown c1, "c1", "DilutionSolve"
+    If Not IsUnknown(v1) Then EnsureNumericKnown v1, "v1", "DilutionSolve"
+    If Not IsUnknown(c2) Then EnsureNumericKnown c2, "c2", "DilutionSolve"
+    If Not IsUnknown(v2) Then EnsureNumericKnown v2, "v2", "DilutionSolve"
 
     ' 三缺一 → 直接求解
     If IsUnknown(c1) Then
@@ -496,6 +509,12 @@ Public Function IdealGasLaw(ByVal pressure_Pa As Variant, ByVal volume_m3 As Var
         Err.Raise ERR_INVALID_INPUT, "IdealGasLaw", _
             "必须恰好有一个未知参数 (传入 Empty)，当前未知数: " & unknowns & "。"
     End If
+
+    ' R5-35: 已知项类型校验 (Boolean/非数值不得静默入算)
+    If Not IsUnknown(pressure_Pa) Then EnsureNumericKnown pressure_Pa, "pressure_Pa", "IdealGasLaw"
+    If Not IsUnknown(volume_m3) Then EnsureNumericKnown volume_m3, "volume_m3", "IdealGasLaw"
+    If Not IsUnknown(moles) Then EnsureNumericKnown moles, "moles", "IdealGasLaw"
+    If Not IsUnknown(temperature_K) Then EnsureNumericKnown temperature_K, "temperature_K", "IdealGasLaw"
 
     If IsUnknown(pressure_Pa) Then
         If CDbl(volume_m3) <= 0 Or CDbl(temperature_K) <= 0 Then Err.Raise ERR_INVALID_INPUT, "IdealGasLaw", "volume_m3 和 temperature_K 必须为正数。"
@@ -581,6 +600,11 @@ Public Function Density(ByVal mass As Variant, ByVal volume As Variant, _
         Err.Raise ERR_INVALID_INPUT, "Density", _
             "必须恰好有一个未知参数 (传入 Empty)，当前未知数: " & unknowns & "。"
     End If
+
+    ' R5-35: 已知项类型校验 (Boolean/非数值不得静默入算)
+    If Not IsUnknown(mass) Then EnsureNumericKnown mass, "mass", "Density"
+    If Not IsUnknown(volume) Then EnsureNumericKnown volume, "volume", "Density"
+    If Not IsUnknown(density_val) Then EnsureNumericKnown density_val, "density_val", "Density"
 
     If IsUnknown(mass) Then
         If CDbl(volume) <= 0 Then Err.Raise ERR_INVALID_INPUT, "Density", "volume 必须为正数。"

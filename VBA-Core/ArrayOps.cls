@@ -96,6 +96,12 @@ End Sub
 
 Private Function CompareCmp(ByVal a As Variant, ByVal b As Variant, _
                              ByVal comparer As String) As Long
+    ' Null/Empty 复用 VK 值序 (避免 numeric/text 分支 CStr(Null) → Error 94);
+    ' "auto" 本就走 VK.Compare，行为不变
+    If IsNull(a) Or IsNull(b) Or IsEmpty(a) Or IsEmpty(b) Then
+        CompareCmp = VK.Compare(a, b)
+        Exit Function
+    End If
     Select Case comparer
         Case "numeric"
             If IsNumeric(a) And IsNumeric(b) Then
@@ -288,6 +294,13 @@ Public Function CollectNumericColumns(ByRef dataArr As Variant, _
     numColsFound = 0
     If hasHeader Then firstDataRow = 2 Else firstDataRow = 1
 
+    ' 仅有表头无数据行: 返回空结果, 不得因内层循环不执行而把所有列判为数值
+    If numRows <= firstDataRow - 1 Then
+        Erase colMap
+        CollectNumericColumns = colMap
+        Exit Function
+    End If
+
     ReDim colMap(1 To numCols)  ' pre-allocate max, truncate after loop
     For c = 1 To numCols
         If hasHeader Then
@@ -328,6 +341,10 @@ Public Sub Test_ArrayOps()
     Dim failCount As Long: failCount = 0
     Dim arr As Variant, result As Variant, arr2D As Variant
     Dim colMap() As Long, colNames() As String
+    Dim nullIdx() As Long
+    Dim hdrOnly(1 To 1, 1 To 3) As Variant
+    Dim oneRow(1 To 1, 1 To 2) As Variant
+    Dim hdrEmpty As Boolean
     Dim i As Long
 
     '=====================================================================
@@ -385,6 +402,41 @@ Public Sub Test_ArrayOps()
     If Not (arr(0) = "a") Then Err.Raise 5
     If Not (arr(1) = "b") Then Err.Raise 5
     If Not (arr(2) = "c") Then Err.Raise 5
+
+    ' Sort — numeric comparer with Null/Empty (2026-09-13 R5-09: 不得抛 Error 94)
+    arr = Array(3, Null, 1)
+    Sort arr, True, "numeric"
+    If Not IsNull(arr(0)) Then Err.Raise 5
+    If Not (arr(1) = 1) Then Err.Raise 5
+    If Not (arr(2) = 3) Then Err.Raise 5
+
+    arr = Array(2, Empty, 1)
+    Sort arr, True, "numeric"
+    If Not IsEmpty(arr(0)) Then Err.Raise 5
+    If Not (arr(1) = 1) Then Err.Raise 5
+    If Not (arr(2) = 2) Then Err.Raise 5
+
+    ' Sort — text comparer with Null
+    arr = Array("b", Null, "a")
+    Sort arr, True, "text"
+    If Not IsNull(arr(0)) Then Err.Raise 5
+    If Not (arr(1) = "a") Then Err.Raise 5
+    If Not (arr(2) = "b") Then Err.Raise 5
+
+    ' Sort — auto comparer unchanged by R5-09 guard
+    arr = Array(3, Null, 1)
+    Sort arr, True
+    If Not IsNull(arr(0)) Then Err.Raise 5
+    If Not (arr(1) = 1) Then Err.Raise 5
+
+    ' SortIndices — numeric comparer with Null (2026-09-13 R5-09)
+    arr = Array(3, Null, 1)
+    ReDim nullIdx(0 To 2)
+    nullIdx(0) = 0: nullIdx(1) = 1: nullIdx(2) = 2
+    SortIndices arr, nullIdx, True, "numeric"
+    If Not (nullIdx(0) = 1) Then Err.Raise 5
+    If Not (nullIdx(1) = 2) Then Err.Raise 5
+    If Not (nullIdx(2) = 0) Then Err.Raise 5
 
     '=====================================================================
     ' Slice
@@ -484,8 +536,27 @@ Public Sub Test_ArrayOps()
     ' Erase-d array → UBound errors = empty; catch and verify
     On Error Resume Next
     i = UBound(colMap)
-    If Err.Number = 0 Then Err.Raise 5  ' should error if truly empty
+    If Err.Number = 0 Then On Error GoTo 0: Err.Raise 5  ' should error if truly empty
     Err.Clear: On Error GoTo 0
+
+    ' Header-only table (no data rows) → empty result (2026-09-13 R5-61:
+    ' 此前内层循环不执行导致所有列被静默判为数值)
+    hdrOnly(1, 1) = "A": hdrOnly(1, 2) = "B": hdrOnly(1, 3) = "C"
+    colMap = CollectNumericColumns(hdrOnly, 1, 3, colNames, True)
+    hdrEmpty = False
+    On Error Resume Next
+    Err.Clear
+    i = UBound(colMap)
+    hdrEmpty = (Err.Number <> 0)
+    Err.Clear
+    On Error GoTo ErrHandler
+    If Not hdrEmpty Then Err.Raise 5
+
+    ' Single data row without header → numeric column still detected
+    oneRow(1, 1) = 1: oneRow(1, 2) = "x"
+    colMap = CollectNumericColumns(oneRow, 1, 2, colNames, False)
+    If Not (UBound(colMap) = 1) Then Err.Raise 5
+    If Not (colMap(1) = 1) Then Err.Raise 5
 
     '=====================================================================
     ' Median-of-three pivot — sorted/reverse-sorted (regression: fix C4)

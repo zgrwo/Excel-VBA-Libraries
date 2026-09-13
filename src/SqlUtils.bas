@@ -90,6 +90,11 @@ Private Const JET_EXT_PROP      As String = ";Extended Properties=""Excel 8.0;HD
 ' @Args value: 需要转义的字符串。非字符串类型自动转换为字符串。
 ' @Args forLike: 是否按 ACE LIKE 语法转义通配符 (% _ [) — 默认 False
 ' @Returns 单引号被转义为 '' 的字符串；forLike=True 时同时转义 LIKE 特殊字符
+'
+' ⚠️ 适用路径 (R5-26): 方括号字符类转义仅对 ACE/Jet SQL 文本执行路径合法
+'   (SqlExecute / SqlQuery / SqlJoin / SqlGroupBy)。SqlRangeQuery 的 WHERE
+'   子句由 ADO Recordset.Filter 执行 — 其 LIKE 引擎把 [ / ] 当字面量, 且
+'   不支持 IN / BETWEEN, 详见 SqlRangeQuery 说明。
 '=============================================================================
 Public Function SqlEscapeString(ByVal value As Variant, Optional ByVal forLike As Boolean = False) As String
     If IsNull(value) Or IsEmpty(value) Then
@@ -139,6 +144,8 @@ Public Function SqlGetConnection( _
         Set defWb = ThisWorkbook
         ' .xlam 加载项自身无法被 ACE 打开 — 默认改用活动工作簿
         If defWb.IsAddIn Then
+            ' Set 失败时对象变量保留原值 (R5-38), 先置 Nothing 使守卫可达
+            Set defWb = Nothing
             On Error Resume Next
             Set defWb = ActiveWorkbook
             On Error GoTo 0
@@ -260,6 +267,34 @@ Private Function EscapeSheetName(ByVal sheetName As String) As String
     Else
         EscapeSheetName = "[" & sheetName & "$]"
     End If
+End Function
+
+'=============================================================================
+' NormalizeTableName — 数据源名归一化 (OpenSchema 匹配用)
+'
+' 统一以下入参/返回值形式为不带包裹的 `Name$`:
+'   Data Sheet           → Data Sheet$
+'   'Data Sheet$'        → Data Sheet$   (ACE OpenSchema 对含空格名返回带单引号)
+'   Data Sheet$          → Data Sheet$
+'   [Data Sheet$]        → Data Sheet$
+' 保持 $ 后缀语义; 空串归一化为 "$" (不会匹配任何实际表)。
+'=============================================================================
+Private Function NormalizeTableName(ByVal tableName As String) As String
+    Dim tbl As String: tbl = Trim$(tableName)
+    ' 剥离成对的方括号标识符
+    If Len(tbl) >= 2 Then
+        If Left$(tbl, 1) = "[" And Right$(tbl, 1) = "]" Then
+            tbl = Mid$(tbl, 2, Len(tbl) - 2)
+        End If
+    End If
+    ' 剥离成对的单引号 (R5-27: ACE OpenSchema 返回 'Data Sheet$')
+    If Len(tbl) >= 2 Then
+        If Left$(tbl, 1) = "'" And Right$(tbl, 1) = "'" Then
+            tbl = Mid$(tbl, 2, Len(tbl) - 2)
+        End If
+    End If
+    If Right$(tbl, 1) <> "$" Then tbl = tbl & "$"
+    NormalizeTableName = tbl
 End Function
 
 '=============================================================================
@@ -451,12 +486,18 @@ Public Function SqlListSheets( _
 
     Dim rows As Variant: rows = rs.GetRows()
     Dim n As Long: n = UBound(rows, 2) + 1
-    ReDim result(1 To n + 1, 1 To 1)
-    result(1, 1) = "SheetName"
+    ' R5-28: 打开中的 .xlsm 经 OpenSchema 返回重复表/列, 按 TABLE_NAME 去重
+    Dim seen As Object: Set seen = CreateObject("Scripting.Dictionary")
     For i = 0 To n - 1
         If Not IsNull(rows(2, i)) Then  ' TABLE_NAME = field index 2
-            result(i + 2, 1) = rows(2, i)
+            If Not seen.Exists(CStr(rows(2, i))) Then seen.Add CStr(rows(2, i)), True
         End If
+    Next i
+    Dim keys As Variant: keys = seen.Keys
+    ReDim result(1 To seen.Count + 1, 1 To 1)
+    result(1, 1) = "SheetName"
+    For i = 0 To seen.Count - 1
+        result(i + 2, 1) = keys(i)
     Next i
     SqlListSheets = result: outOk = True
     GoTo Cleanup
@@ -482,12 +523,8 @@ Public Function SqlListColumns( _
 
     Dim conn As Object, rs As Object
     Dim result() As Variant, i As Long, cnt As Long
-    ' Normalize: keep $ suffix, strip brackets
-    Dim tbl As String: tbl = tableName
-    If Left$(tbl, 1) = "[" And Right$(tbl, 1) = "]" Then
-        tbl = Mid$(tbl, 2, Len(tbl) - 2)
-    End If
-    If Right$(tbl, 1) <> "$" Then tbl = tbl & "$"
+    ' Normalize: 剥离 [] / ACE OpenSchema 单引号包裹 ('Name$'), 保持 $ 后缀 (R5-27)
+    Dim tbl As String: tbl = NormalizeTableName(tableName)
 
     outOk = False
     On Error GoTo ErrSchema
@@ -500,26 +537,47 @@ Public Function SqlListColumns( _
         SqlListColumns = result: outOk = True: GoTo Cleanup
     End If
 
-    ' Filter: TABLE_NAME = tbl (field index 2)
-    rs.Filter = "TABLE_NAME='" & Replace(tbl, "'", "''") & "'"
-    If rs.EOF Then
+    ' ACE 对含空格表名返回 'Data Sheet$' (单引号是字段值的一部分), rs.Filter 的
+    ' 字符串字面量无法同时兼容带/不带引号的 provider 行为 — 逐行归一化后比较 (R5-27)
+    ' R5-28: 同一表在打开中的 .xlsm 下返回重复列, 按 ORDINAL_POSITION 去重
+    cnt = 0: rs.MoveFirst
+    Dim seen As Object: Set seen = CreateObject("Scripting.Dictionary")
+    Do While Not rs.EOF
+        If Not IsNull(rs.Fields("TABLE_NAME").Value) Then
+            If StrComp(NormalizeTableName(CStr(rs.Fields("TABLE_NAME").Value)), tbl, vbTextCompare) = 0 Then
+                If Not IsNull(rs.Fields("ORDINAL_POSITION").Value) Then
+                    If Not seen.Exists(CStr(rs.Fields("ORDINAL_POSITION").Value)) Then
+                        seen.Add CStr(rs.Fields("ORDINAL_POSITION").Value), True
+                        cnt = cnt + 1
+                    End If
+                End If
+            End If
+        End If
+        rs.MoveNext
+    Loop
+    If cnt = 0 Then
         ReDim result(1 To 1, 1 To 1): result(1, 1) = Empty
         SqlListColumns = result: outOk = True: GoTo Cleanup
     End If
-
-    cnt = 0: rs.MoveFirst
-    Do While Not rs.EOF
-        cnt = cnt + 1: rs.MoveNext
-    Loop
     rs.MoveFirst
 
+    Dim emitted As Object: Set emitted = CreateObject("Scripting.Dictionary")
     ReDim result(1 To cnt + 1, 1 To 2)
     result(1, 1) = "ColIndex": result(1, 2) = "ColName"
     i = 0
     Do While Not rs.EOF
-        i = i + 1
-        result(i + 1, 1) = rs.Fields("ORDINAL_POSITION").Value
-        result(i + 1, 2) = rs.Fields("COLUMN_NAME").Value
+        If Not IsNull(rs.Fields("TABLE_NAME").Value) Then
+            If StrComp(NormalizeTableName(CStr(rs.Fields("TABLE_NAME").Value)), tbl, vbTextCompare) = 0 Then
+                If Not IsNull(rs.Fields("ORDINAL_POSITION").Value) Then
+                    If Not emitted.Exists(CStr(rs.Fields("ORDINAL_POSITION").Value)) Then
+                        emitted.Add CStr(rs.Fields("ORDINAL_POSITION").Value), True
+                        i = i + 1
+                        result(i + 1, 1) = rs.Fields("ORDINAL_POSITION").Value
+                        result(i + 1, 2) = rs.Fields("COLUMN_NAME").Value
+                    End If
+                End If
+            End If
+        End If
         rs.MoveNext
     Loop
     SqlListColumns = result: outOk = True
@@ -557,20 +615,33 @@ Public Function SqlListTables( _
         SqlListTables = result: outOk = True: GoTo Cleanup
     End If
 
-    ' Count rows
+    ' Count rows (R5-28: 按 TABLE_NAME 去重, 打开中的 .xlsm 会返回重复表)
+    Dim seen As Object: Set seen = CreateObject("Scripting.Dictionary")
     cnt = 0: rs.MoveFirst
     Do While Not rs.EOF
-        cnt = cnt + 1: rs.MoveNext
+        If Not IsNull(rs.Fields("TABLE_NAME").Value) Then
+            If Not seen.Exists(CStr(rs.Fields("TABLE_NAME").Value)) Then
+                seen.Add CStr(rs.Fields("TABLE_NAME").Value), True
+                cnt = cnt + 1
+            End If
+        End If
+        rs.MoveNext
     Loop
     rs.MoveFirst
 
+    Dim emitted As Object: Set emitted = CreateObject("Scripting.Dictionary")
     ReDim result(1 To cnt + 1, 1 To 2)
     result(1, 1) = "TableName": result(1, 2) = "TableType"
     i = 0
     Do While Not rs.EOF
-        i = i + 1
-        result(i + 1, 1) = rs.Fields("TABLE_NAME").Value
-        result(i + 1, 2) = rs.Fields("TABLE_TYPE").Value
+        If Not IsNull(rs.Fields("TABLE_NAME").Value) Then
+            If Not emitted.Exists(CStr(rs.Fields("TABLE_NAME").Value)) Then
+                emitted.Add CStr(rs.Fields("TABLE_NAME").Value), True
+                i = i + 1
+                result(i + 1, 1) = rs.Fields("TABLE_NAME").Value
+                result(i + 1, 2) = rs.Fields("TABLE_TYPE").Value
+            End If
+        End If
         rs.MoveNext
     Loop
     SqlListTables = result: outOk = True
@@ -588,9 +659,75 @@ Cleanup:
 End Function
 
 '=============================================================================
+' FindSqlKeyword — 定位字符串字面量/方括号标识符之外、词边界合格的 SQL 关键词
+'
+' 用途: SqlRangeQuery 解析 SELECT 文本中的 WHERE / ORDER BY, 避免字符串
+'   字面量 ('WHERE') 或表名 ([DataWhere$]) 中的子串误命中 (R5-05 / R5-36)。
+' 单引号字符串内 '' 与方括号标识符内 ]] 为转义序列, 其内部文本不参与匹配。
+' 词边界: 关键词前后须为字符串首尾、空白、()、; 或 ,
+'
+' @Returns 关键词 1-based 起始位置; 0 = 未找到
+'=============================================================================
+Private Function FindSqlKeyword(ByVal sql As String, ByVal keyword As String) As Long
+    Dim i As Long, kLen As Long
+    Dim ch1 As String, ch2 As String
+    Dim beforeCh As String, afterCh As String
+    Dim inQuote As Boolean, inBracket As Boolean
+
+    kLen = Len(keyword)
+    If kLen = 0 Then Exit Function
+    i = 1
+    Do While i <= Len(sql)
+        ch1 = Mid$(sql, i, 1)
+        ch2 = ""
+        If i < Len(sql) Then ch2 = Mid$(sql, i + 1, 1)
+        If inQuote Then
+            If ch1 = "'" Then
+                If ch2 = "'" Then i = i + 2 Else inQuote = False: i = i + 1
+            Else
+                i = i + 1
+            End If
+        ElseIf inBracket Then
+            If ch1 = "]" Then
+                If ch2 = "]" Then i = i + 2 Else inBracket = False: i = i + 1
+            Else
+                i = i + 1
+            End If
+        ElseIf ch1 = "'" Then
+            inQuote = True: i = i + 1
+        ElseIf ch1 = "[" Then
+            inBracket = True: i = i + 1
+        Else
+            If StrComp(Mid$(sql, i, kLen), keyword, vbTextCompare) = 0 Then
+                beforeCh = "": If i > 1 Then beforeCh = Mid$(sql, i - 1, 1)
+                afterCh = "": If i + kLen <= Len(sql) Then afterCh = Mid$(sql, i + kLen, 1)
+                If IsSqlWordBoundary(beforeCh) And IsSqlWordBoundary(afterCh) Then
+                    FindSqlKeyword = i
+                    Exit Function
+                End If
+            End If
+            i = i + 1
+        End If
+    Loop
+End Function
+
+'=============================================================================
+' IsSqlWordBoundary — SQL 关键词边界字符判定 (首尾/空白/圆括号/分号/逗号)
+'=============================================================================
+Private Function IsSqlWordBoundary(ByVal ch As String) As Boolean
+    IsSqlWordBoundary = (ch = "" Or ch = " " Or ch = vbTab Or ch = vbCr Or ch = vbLf _
+        Or ch = "(" Or ch = ")" Or ch = ";" Or ch = ",")
+End Function
+
+'=============================================================================
 ' SqlRangeQuery — 对 Range 直接查询 (无需保存工作簿)
 ' 支持: SELECT * (返回所有列) | WHERE (rs.Filter)
 ' 不支持: 指定列、ORDER BY、JOIN、GROUP BY、聚合函数
+'
+' ⚠️ WHERE 能力边界 (R5-26): 子句交由 ADODB Recordset.Filter 执行, 其 LIKE
+'   引擎与 ACE SQL 不同 — 方括号按字面量匹配 (SqlEscapeString(forLike:=True)
+'   的输出仅适用于 ACE SQL 路径), 且不支持 IN / NOT IN / BETWEEN。
+' ⚠️ 单单元格 Range 输入直接原样返回, 不解析/应用 WHERE, tableAlias 仅作占位。
 '=============================================================================
 Public Function SqlRangeQuery( _
     ByVal sql As String, _
@@ -622,6 +759,7 @@ Public Function SqlRangeQuery( _
     rs.CursorLocation = 3  ' adUseClient
     data = rng.Value
 
+    ' 单格输入无表头/行概念: 设计上原样返回单值, 不解析/应用 WHERE (tableAlias 忽略) — R5-59
     If rng.Count = 1 Then
         ReDim result(1 To 1, 1 To 2)
         result(1, 1) = "F1": result(1, 2) = data
@@ -689,20 +827,12 @@ Public Function SqlRangeQuery( _
         rs.Update
     Next i
 
-    ' Extract WHERE clause → rs.Filter (词边界识别, 容忍 WHERE( 与制表符)
-    Dim sqlUpper As String: sqlUpper = UCase$(sql)
+    ' Extract WHERE clause → rs.Filter (词边界识别; 跳过字符串字面量/方括号标识符,
+    ' 容忍 WHERE( 与制表符; R5-05: 首个命中不合格时继续向后搜索)
     Dim wherePos As Long
-    wherePos = InStr(1, sqlUpper, "WHERE", vbTextCompare)
-    If wherePos > 0 Then
-        Dim beforeCh As String, afterCh As String
-        beforeCh = "": If wherePos > 1 Then beforeCh = Mid$(sqlUpper, wherePos - 1, 1)
-        afterCh = "": If wherePos + 5 <= Len(sqlUpper) Then afterCh = Mid$(sqlUpper, wherePos + 5, 1)
-        Dim beforeOk As Boolean, afterOk As Boolean
-        beforeOk = (beforeCh = "" Or beforeCh = " " Or beforeCh = vbTab Or beforeCh = ")" Or beforeCh = ";")
-        afterOk = (afterCh = "" Or afterCh = " " Or afterCh = vbTab Or afterCh = vbLf Or afterCh = "(")
-        If Not (beforeOk And afterOk) Then wherePos = 0
-    End If
-    If InStr(1, sqlUpper, "ORDER BY", vbTextCompare) > 0 Then
+    wherePos = FindSqlKeyword(sql, "WHERE")
+    ' R5-36: ORDER BY 同样只在引号/标识符之外按词边界检测 (WHERE Name='ORDER BY x' 合法)
+    If FindSqlKeyword(sql, "ORDER BY") > 0 Then
         Err.Raise ERR_INVALID_INPUT, "SqlRangeQuery", _
             "不支持 ORDER BY — 仅支持 SELECT * ... [WHERE ...]"
     End If
@@ -868,8 +998,23 @@ End Function
 '=====================================================================
 Public Sub Test_SqlUtils()
     Dim rng As Range, result As Variant, ok As Boolean
-    Dim ws As Worksheet, i As Long, j As Long
-    Dim conn As Object
+    Dim ws As Worksheet, i As Long
+    Dim failed As Boolean
+    Dim savedErrNum As Long, savedErrDesc As String
+
+    On Error GoTo TestError
+
+    '=====================================================================
+    ' SqlEscapeString / NormalizeTableName — 单元断言
+    '=====================================================================
+    If Not (SqlEscapeString("O'Brien's") = "O''Brien''s") Then Err.Raise 5
+    If Not (SqlEscapeString("a[b]", True) = "a[[]b]") Then Err.Raise 5
+    If Not (SqlEscapeString("100%_x[", True) = "100[%][_]x[[]") Then Err.Raise 5
+    ' R5-27: 含空格表名四种入参形式归一化一致
+    If Not (NormalizeTableName("Data Sheet") = "Data Sheet$") Then Err.Raise 5
+    If Not (NormalizeTableName("'Data Sheet$'") = "Data Sheet$") Then Err.Raise 5
+    If Not (NormalizeTableName("Data Sheet$") = "Data Sheet$") Then Err.Raise 5
+    If Not (NormalizeTableName("[Data Sheet$]") = "Data Sheet$") Then Err.Raise 5
 
     '=====================================================================
     ' SqlRangeQuery — SELECT *
@@ -915,6 +1060,39 @@ Public Sub Test_SqlUtils()
     If Not (UBound(result, 1) = 1) Then Err.Raise 5
     If Not (IsEmpty(result(1, 1))) Then Err.Raise 5
 
+    ' SqlRangeQuery — R5-05: 字符串字面量/表名中的 WHERE 不得吞掉过滤
+    result = SqlRangeQuery("SELECT 'WHERE' AS w FROM data WHERE Score > 90", rng, "data", ok)
+    If Not (ok = True) Then Err.Raise 5
+    If Not (UBound(result, 1) = 2) Then Err.Raise 5
+    If Not (result(2, 2) = "Charlie") Then Err.Raise 5
+
+    result = SqlRangeQuery("SELECT * FROM [DataWhere$] WHERE Score > 90", rng, "data", ok)
+    If Not (ok = True) Then Err.Raise 5
+    If Not (UBound(result, 1) = 2) Then Err.Raise 5
+    If Not (result(2, 2) = "Charlie") Then Err.Raise 5
+
+    ' SqlRangeQuery — R3 目标场景保持有效: WHERE( 与制表符
+    result = SqlRangeQuery("SELECT * FROM data WHERE(Score > 90)", rng, "data", ok)
+    If Not (ok = True) Then Err.Raise 5
+    If Not (UBound(result, 1) = 2) Then Err.Raise 5
+
+    result = SqlRangeQuery("SELECT * FROM data" & vbTab & "WHERE" & vbTab & "Score > 90", rng, "data", ok)
+    If Not (ok = True) Then Err.Raise 5
+    If Not (UBound(result, 1) = 2) Then Err.Raise 5
+
+    ' SqlRangeQuery — R5-36: WHERE 字符串字面量中的 ORDER BY 不得误判
+    result = SqlRangeQuery("SELECT * FROM data WHERE Name = 'ORDER BY x'", rng, "data", ok)
+    If Not (ok = True) Then Err.Raise 5
+    If Not (UBound(result, 1) = 1) Then Err.Raise 5
+    If Not (IsEmpty(result(1, 1))) Then Err.Raise 5
+
+    ' SqlRangeQuery — R5-36 反例: 真正的 ORDER BY 仍须拒绝
+    On Error Resume Next
+    result = SqlRangeQuery("SELECT * FROM data ORDER BY Score", rng, "data", ok)
+    If Err.Number = 0 And ok Then failed = True  ' 未拒绝 = 失败 (契约: outOk=False 软失败, R5-58)
+    Err.Clear: On Error GoTo TestError
+    If failed Then Err.Raise 5
+
     ' SqlRangeQuery — single cell
     Set rng = ws.Range("A1")
     result = SqlRangeQuery("SELECT * FROM data", rng, "data", ok)
@@ -923,11 +1101,12 @@ Public Sub Test_SqlUtils()
     If Not (UBound(result, 2) = 2) Then Err.Raise 5
     If Not (result(1, 1) = "F1") Then Err.Raise 5
 
-    ' SqlRangeQuery — Nothing Range (应报错)
+    ' SqlRangeQuery — Nothing Range (应报错; OERN 下 Err.Raise 会静默通过 — R5-58)
     On Error Resume Next
     result = SqlRangeQuery("SELECT *", Nothing, "data", ok)
-    If Not (Err.Number <> 0) Then Err.Raise 5
-    Err.Clear: On Error GoTo 0
+    If Err.Number = 0 Then failed = True
+    Err.Clear: On Error GoTo TestError
+    If failed Then Err.Raise 5
 
     '=====================================================================
     ' SqlQuery — SELECT * (需要已保存的工作簿)
@@ -981,11 +1160,12 @@ Public Sub Test_SqlUtils()
     On Error Resume Next
     Set rng = ws.Range("A1:C4")
     result = SqlRangeQuery("GARBAGE SQL", rng, "data", ok)
-    If Not (ok = False) Then Err.Raise 5
+    If Err.Number = 0 And ok Then failed = True  ' 未拒绝 = 失败 (R5-58)
     Err.Clear
     result = SqlRangeQuery("SELECT * FROM ", rng, "", ok)
-    If Not (ok = False Or Err.Number <> 0) Then Err.Raise 5
-    Err.Clear: On Error GoTo 0
+    If Err.Number = 0 And ok Then failed = True
+    Err.Clear: On Error GoTo TestError
+    If failed Then Err.Raise 5
 
     '=====================================================================
     ' 边界: SqlListSheets — 不存在的外部文件
@@ -994,10 +1174,24 @@ Public Sub Test_SqlUtils()
     If Not (ok = False Or IsArray(result)) Then Err.Raise 5
 
     '=====================================================================
-    ' Cleanup
+    ' Cleanup — 断言失败/错误路径也必须删除临时表并释放连接 (R5-60)
     '=====================================================================
+TestCleanup:
     Application.DisplayAlerts = False
-    ws.Delete
+    If Not ws Is Nothing Then
+        On Error Resume Next
+        ws.Delete
+        Err.Clear
+    End If
+    On Error GoTo 0
     Application.DisplayAlerts = True
     CloseSqlCache
+    If savedErrNum <> 0 Then Err.Raise savedErrNum, "Test_SqlUtils", savedErrDesc
+    Exit Sub
+
+TestError:
+    savedErrNum = Err.Number
+    savedErrDesc = Err.Description
+    Debug.Print "Test_SqlUtils FAILED: [" & savedErrNum & "] " & savedErrDesc
+    Resume TestCleanup
 End Sub
