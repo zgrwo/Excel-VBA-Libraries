@@ -56,6 +56,9 @@ def _check_md_links(doc: Path, root: Path, problems: list[str]) -> None:
 def _check_backtick_paths(doc: Path, root: Path, problems: list[str]) -> None:
     if doc.name in SKIP_DOCS:
         return
+    # 方案/计划文档天然引用"未来才创建"的文件路径 — 只做 Markdown 链接检查
+    if doc.parent.name == "plans":
+        return
     try:
         text = doc.read_text(encoding="utf-8", errors="replace")
     except OSError:

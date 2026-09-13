@@ -86,7 +86,8 @@ ExcelVBA函数库/
 │   ├── sentinel-contract.md      # 哨兵契约 L1-L5 与 NaN/Inf 守卫清单
 │   ├── cross-project-synthesis.md # 跨项目共性经验与反模式库
 │   ├── adr-template.md           # 架构决策记录（ADR）模板
-│   └── adr/                         # ADR 决策记录（编号递增）
+│   ├── adr/                         # ADR 决策记录（编号递增）
+│   └── plans/                       # 方案/移植计划（按日期命名归档）
 ├── skills/                         # AI 编码规范（扁平结构）
 │   ├── vba-SKILL.md              # VBA 编码规范
 │   ├── vba-manual-authoring.md   # 手册撰写规范
@@ -184,6 +185,7 @@ ExcelVBA函数库/
 | `context.md` | 术语表 |
 | `documentation.md` | 文档职责 |
 | `code-review-prompt.md` | 审查模板 |
+| `plans/` | 方案/移植计划（按日期命名归档） |
 
 ### skills/ — AI 编码规范层
 
