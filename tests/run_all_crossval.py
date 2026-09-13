@@ -34,6 +34,7 @@ BUILD_MODULES = [
     ("SqlUtils",        "tests.crossval.build_SqlUtils"),
     ("PhyChemUtils",    "tests.crossval.build_PhyChemUtils"),
     ("RegressUtils",    "tests.crossval.build_RegressUtils"),
+    ("SolveUtils",      "tests.crossval.build_SolveUtils"),
     ("ManualExamples",  "tests.crossval.build_manual_examples"),
     ("UDF-Range-xlsm",  "tests.crossval.build_udf_range"),
 ]

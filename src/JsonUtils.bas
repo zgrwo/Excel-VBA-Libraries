@@ -336,7 +336,7 @@ Private Function ParseString(ByRef st As TJsonState) As String
                         "JSON 语法错误: 位置 " & (st.pos - 1) & " 无效的转义字符 \" & c
             End Select
         Else
-            If AscW(c) < 32 Then
+            If (AscW(c) And &HFFFF&) < 32 Then
                 Err.Raise ERR_INVALID_JSON, "JsonUtils", _
                     "JSON 语法错误: 字符串含未转义控制字符 (位置 " & (st.pos - 1) & ")"
             End If

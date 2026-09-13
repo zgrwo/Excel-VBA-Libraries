@@ -978,11 +978,12 @@ Public Sub EigenSymmetric(ByRef A() As Double, _
     If symTol < DEFAULT_TOL Then symTol = DEFAULT_TOL
 
     ' 合并对称性检查和输入缩放到一次遍历
+    ' 容差内接受的输入显式取对称部分 (A+Aᵀ)/2, 保证 Jacobi 迭代语义一致
     If maxAbsA > 0# Then
         ReDim D(1 To n, 1 To n)
         For i = 1 To n
             For j = 1 To n
-                D(i, j) = workA(i, j) / maxAbsA
+                D(i, j) = (workA(i, j) + workA(j, i)) / (2# * maxAbsA)
                 If j > i Then
                     If Abs(workA(i, j) - workA(j, i)) > symTol Then
                         Err.Raise ERR_NOT_SYMMETRIC, "EigenSymmetric", "矩阵不对称，请使用 SVD。"
@@ -1132,16 +1133,15 @@ Public Sub QRDecomposition(ByRef A() As Double, _
         End If
     Next k
 
-    ' 经济模式
+    ' 经济模式 (reduced QR)
     If economy Then
         Dim Rout() As Double, Qout() As Double
-        ' 确保 R 方阵: maxK x maxK (只保留三角部分).
-        ' 注意: 宽矩阵 (m<n) 时经济模式 R 为 m×m, 丢弃第 m+1..n 列 —
-        ' 与主流 reduced-QR (m×n 上梯形) 语义不同, 此时 Q·R 不等于 A.
-        ReDim Rout(1 To maxK, 1 To maxK)
+        ' Q = m×maxK; R = maxK×n (上梯形完整保留)
+        ' 宽矩阵 (m<n) 时 R 保留全部 n 列, Q·R = A; 高/方矩阵即 maxK×maxK。
+        ReDim Rout(1 To maxK, 1 To n)
         Dim rr As Long, cc As Long
         For rr = 1 To maxK
-            For cc = 1 To maxK
+            For cc = 1 To n
                 If rr <= cc Then
                     Rout(rr, cc) = R(rR0 + rr - 1, cR0 + cc - 1)
                 Else
@@ -1272,13 +1272,13 @@ Public Sub QRDecompositionPiv(ByRef A() As Double, _
         End If
     Next k
 
-    ' 经济模式
+    ' 经济模式 (reduced QR, 与 QRDecomposition 一致)
     If economy Then
         Dim Rout() As Double, Qout() As Double
-        ReDim Rout(1 To maxK, 1 To maxK)
+        ReDim Rout(1 To maxK, 1 To n)
         Dim rr As Long, cc As Long
         For rr = 1 To maxK
-            For cc = 1 To maxK
+            For cc = 1 To n
                 If rr <= cc Then
                     Rout(rr, cc) = R(rR0 + rr - 1, cR0 + cc - 1)
                 Else

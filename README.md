@@ -1,6 +1,6 @@
 # Excel-VBA-Libraries
 
-> 高性能 VBA 函数库：15 个模块，纯 VBA 实现，零外部依赖，兼容 Excel 2010+。
+> 高性能 VBA 函数库：16 个模块，纯 VBA 实现，零外部依赖，兼容 Excel 2010+。
 
 ---
 
@@ -30,6 +30,7 @@
 | `StatsUtils` | 描述统计（均值/方差/分位数/相关/t检验） | `=Mean(A1:A100)` |
 | `LinearUtils` | 线性代数（SVD/伪逆/QR/矩阵乘法） | `=UDF_LINALG_DET(A1:D4)` |
 | `RegressUtils` | 回归分析（OLS/WLS/岭回归） | `=FitOLS(y_range, x_range)` |
+| `SolveUtils` | 工艺参数反解（目标反推可调参数/质量/方程） | `=UDF_SOLVE_INVERSE(A1:C12)` |
 | `PhyChemUtils` | 物理化学（分子量/温度/压力/理想气体） | `=MolecularWeight("H2SO4")` |
 | `StringUtils` | 字符串处理（格式化/反转/编码/截断） | `=ReverseString("hello")` |
 | `DateTimeUtils` | 日期时间（周/月/季度/工作日） | `=LastDayOfMonth(A1)` |
@@ -107,14 +108,14 @@ result = Mean(Array(1,2,3,4,5))   ' 数组路径
 
 - **VBA 语言**：微软已停止 VBA 语言演进，推荐 Office Scripts（TypeScript）为未来路径
 - **Excel COM**：交叉验证和集成测试需安装 Excel（非跨平台）
-- **模块依赖**：RegressUtils 依赖 LinearUtils + StatsUtils（其他 13 个模块相互独立）
+- **模块依赖**：RegressUtils 依赖 LinearUtils + StatsUtils、SolveUtils 依赖 LinearUtils（其余 14 个模块相互独立）
 - **VBA-Core 接口**：接口已冻结，不可随意修改
 
 ---
 
 ## 长期迁移路径
 
-保持 15 个模块相互独立 = 保持未来逐模块迁移 Office Scripts 的可能性：
+保持 16 个模块相互独立 = 保持未来逐模块迁移 Office Scripts 的可能性：
 - 每个模块可独立测试（不依赖其他模块运行）
 - 模块间通过明确接口通信（不共享内部状态）
 - 迁移时逐模块替换，而非一次性重写
@@ -140,12 +141,12 @@ VBA-Core (类模块)
   VariantKit → ArrayOps → DictProxy（导入时按此顺序）
       ↑ 依赖
 src/ (标准模块)
-  15 个 .bas 模块，相互独立（均依赖 VBA-Core）
+  16 个 .bas 模块，相互独立（均依赖 VBA-Core）
 ```
 
 - ✅ 纯 VBA 实现，零外部依赖（仅 Windows 内置 COM 接口）
 - ✅ 所有 Public 函数双路径处理（Range 对象 + Variant 数组）
-- ✅ 14/15 模块真正独立，支持逐模块迁移至 Office Scripts
+- ✅ 14/16 模块真正独立，支持逐模块迁移至 Office Scripts
 - ❌ VBA-Core 接口冻结，禁止修改
 - ❌ 禁止裸 `On Error Resume Next` 不检查 Err
 
@@ -173,7 +174,7 @@ python tests/utils/integration_test_all_modules.py
 
 | 文档 | 角色 | 内容 |
 |------|------|------|
-| [API 参考](rules/api-reference.md) | 签名唯一信源 | 15 个模块函数签名、参数说明 |
+| [API 参考](rules/api-reference.md) | 签名唯一信源 | 16 个模块函数签名、参数说明 |
 | [用户手册](rules/user-manual.md) | 学习教程 | 每个函数详细示例 + 结果解读 |
 | [context.md](rules/context.md) | 术语表 | 所有领域术语唯一定义 |
 | [project-structure.md](rules/project-structure.md) | 结构地图 | 文件职责与层级关系 |

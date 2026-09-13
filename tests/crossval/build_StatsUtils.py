@@ -26,6 +26,30 @@ RNG = np.random.default_rng(42)
 DATA_5 = [1.0, 2.0, 3.0, 4.0, 5.0]
 DATA_6 = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
 
+
+def _zscore_err_probe(excel, wb, ws, runner, tc, args):
+    """R4-08: 非法 value 必须在 VBA 内部捕获错误 (错误不穿透 COM)。"""
+    from tests.test_utils import run_macro
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == "StatsR4Probe":
+            vbproj.VBComponents.Remove(comp)
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = "StatsR4Probe"
+    comp.CodeModule.AddFromString(
+        "Option Explicit\r\n"
+        "Public Function Probe() As Double\r\n"
+        "    On Error GoTo EH\r\n"
+        "    Dim v As Variant\r\n"
+        "    v = ZScore(Array(1#, 2#, 3#, 4#), \"abc\")\r\n"
+        "    Probe = 0\r\n"
+        "    Exit Function\r\n"
+        "EH:\r\n"
+        "    Probe = 1\r\n"
+        "End Function")
+    val = run_macro(excel, wb, "StatsR4Probe.Probe")
+    return float(val), 1.0, 0.0
+
 # =============================================================================
 # Test Cases
 # =============================================================================
@@ -429,6 +453,9 @@ if _HAS_SCIPY:
          "args": lambda: ([1e13, 1e13 + 1, 1e13 + 2], 1e13 + 2),
          "py_ref": lambda a: 1.0,
          "result_type": "scalar", "tol": 1e-10},
+        # 2026-09-13 R4-08 回归: 非法 value 必须报错, 不得静默返回数组 (VBA 内捕获)
+        {"name": "ZScore_invalid_value", "func": "ZScore",
+         "args": lambda: (), "reconstruct": _zscore_err_probe, "py_ref": lambda a: 1.0},
     ]
 
 

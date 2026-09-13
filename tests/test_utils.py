@@ -4,7 +4,7 @@ Follows the patterns established in skills/python-SKILL.md:
   - COM-first testing via pywin32
   - Python as referee, not implementation
   - Cleanup is non-negotiable (try/finally teardown)
-  - Early dispatch in Python (EnsureDispatch)
+  - Late binding (Dispatch) — no gencache/makepy dependency
 """
 
 import os
@@ -41,8 +41,11 @@ def ensure_excel(visible: bool = False) -> Any:
     DisplayAlerts, AskToUpdateLinks, EnableEvents, ScreenUpdating.
     Sets AutomationSecurity to msoAutomationSecurityLow so macros can run
     without prompting.
+
+    Uses late binding (``Dispatch``) — avoids gencache/makepy failures that
+    occur when the pywin32 type cache is stale or a previous instance died.
     """
-    excel = win32.gencache.EnsureDispatch("Excel.Application")
+    excel = win32.Dispatch("Excel.Application")
     excel.Visible = visible
     excel.DisplayAlerts = False
     excel.AskToUpdateLinks = False
@@ -279,8 +282,7 @@ Public Sub AssertEqual(ByVal testName As String, _
         ws.Cells(r, 3).Value = "PASS"
     Else
         ws.Cells(r, 3).Value = "FAIL"
-        ws.Cells(r, 4).Value = "Expected " & CStr(expected) & _
-                               ", got " & CStr(actual)
+        ws.Cells(r, 4).Value = "Expected " & CStr(expected) & ", got " & CStr(actual)
     End If
 End Sub
 """

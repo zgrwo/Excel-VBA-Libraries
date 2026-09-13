@@ -36,6 +36,27 @@ def _py_groupby_list(data, gc, ac, fn):
         elif fn_u == "MAX":  out.append([k, max(vs)])
     return out
 
+
+def _py_groupby_skip_blank(data, gc, ac, fn):
+    """R4-16 ref: 空白聚合值跳过 (COUNT 除外)。"""
+    grp = {}
+    for r in data[1:]:
+        v = r[ac-1]
+        if v is None:
+            continue
+        grp.setdefault(r[gc-1], []).append(float(v))
+    fn_u = fn.upper()
+    out = [[str(data[0][gc-1]), fn_u + "(" + str(data[0][ac-1]) + ")"]]
+    for k in sorted(grp, key=str):
+        vs = grp[k]
+        if fn_u == "AVG":  out.append([k, sum(vs)/len(vs)])
+        elif fn_u == "MIN": out.append([k, min(vs)])
+        elif fn_u == "SUM": out.append([k, sum(vs)])
+    return out
+
+# R4-16 fixture: A 组 10/空/20, B 组 空/5
+BLANK_AGG = [["G", "V"], ["A", 10], ["A", None], ["A", 20], ["B", None], ["B", 5]]
+
 def _py_cross(a, b):
     """CrossJoin Python ref — cartesian product as list of lists (numeric strings → float)."""
     result = []
@@ -157,6 +178,18 @@ TEST_CASES = [
      "result_type": "array", "tol": 1e-10},
 
     # Sub procedures (FilterTable, TransposeTable, etc.) — write to Range, no COM testable
+
+    # =====================================================================
+    # 2026-09-13 R4-16 回归: 空白聚合值不得按 0 参与 AVG/MIN/MAX
+    # =====================================================================
+    {"name": "GroupBy_AVG_skip_blank", "func": "GroupBy",
+     "args": lambda: (BLANK_AGG, 1, 2, "AVG"),
+     "py_ref": lambda a: _py_groupby_skip_blank(a[0], a[1], a[2], a[3]),
+     "result_type": "array", "is_udf": True, "tol": 1e-12},
+    {"name": "GroupBy_MIN_skip_blank", "func": "GroupBy",
+     "args": lambda: (BLANK_AGG, 1, 2, "MIN"),
+     "py_ref": lambda a: _py_groupby_skip_blank(a[0], a[1], a[2], a[3]),
+     "result_type": "array", "is_udf": True, "tol": 1e-12},
 
 ]
 

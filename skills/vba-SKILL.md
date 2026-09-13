@@ -403,7 +403,11 @@ scalars, or `Null`/`Empty`/`Error`).
 #### Type Detection
 
 - **IsObject(Nothing)** is unreliable on 64-bit. Always pair with `VarType(v) = vbObject`.
-- **IsDate(2025) returns True**. When a parameter might be a date or a year number, check `VarType(v) = vbDate` first.
+- **`IsDate` 对数值返回 False**（实测 Excel 16.0 64-bit；仅 vbDate 与日期字符串为 True）。
+  需要兼容工作表日期序列号时：`VarType(v) = vbDate` 优先，否则 `IsNumeric(v)` → `CDate(CDbl(v))`，
+  并校验序列号范围（1..2958465）。不要用 `IsDate(Double)` 判定日期。
+- **`AscW` 返回有符号 Integer**：码元 ≥ `&H8000`（代理对、U+FFFD 等）返回负值。
+  与 ASCII 阈值比较时必须先 `And &HFFFF&`，否则 `AscW(c) < 32` 会把合法字符误判为控制字符。
 - **VarType constants are not sequential**. Use `Select Case` instead of range checks.
 - **IsNumeric(Empty) = True** in VBA. Empty coerces to 0, so `IsNumeric` returns True
   and `CDbl(Empty) = 0`. When filtering non-numeric values, check `IsEmpty` before
@@ -862,7 +866,8 @@ End Function
 
 **Surrogate pairs:**
 Characters outside the Basic Multilingual Plane (emoji, rare CJK) occupy two UTF-16 code units.
-Detect them with `AscW(Mid$(text, i, 1))` and check `&HD800& <= cp <= &HDBFF&`.
+Detect them with `AscW(Mid$(text, i, 1)) And &HFFFF&` and check `&HD800& <= cp <= &HDBFF&`
+(signed `AscW` returns negative for surrogate halves — always mask first).
 
 ## 11. Design Matrix & Regression
 

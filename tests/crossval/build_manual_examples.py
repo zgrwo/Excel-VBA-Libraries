@@ -374,6 +374,31 @@ MANUAL_EXAMPLES = [
     ("14","PercentYield_100","PhyChemUtils","PercentYield",lambda:(10.,10.),lambda a:100.,"scalar",0.01),
     ("14","DilutionSolve","PhyChemUtils","DilutionSolve",lambda:(10.,100.,5.,None),lambda a:200.,"scalar",0.01),
     ("14","DilutionSolve_c1","PhyChemUtils","DilutionSolve",lambda:(10.,50.,None,200.),lambda a:2.5,"scalar",0.01),
+
+    # ======================================================================
+    # Chapter 16: SolveUtils (2 examples — Range/UDF path)
+    # ======================================================================
+    ("16","SolveEquation_LinearText","SolveUtils","UDF_SOLVE_EQUATION",
+     lambda:(_solve_hist(),"linear"),lambda a:_SOLVE_EQ_TABLE,"array",1e-9,True),
+    ("16","SolvePredict_Linear","SolveUtils","UDF_SOLVE_PREDICT",
+     lambda:(_solve_hist(),[[10.,4.],[1.,5.]],"linear"),lambda a:[[13.],[10.]],"array",1e-8,True),
+]
+
+
+def _solve_hist():
+    """Chapter 16 fixture: y = 2 + 0.5·IncomingA + 1.5·VariableU1."""
+    rows = [["IncomingA", "VariableU1", "OutputY1"]]
+    for i in range(1, 11):
+        a = float(i)
+        u = float(((i * 3) % 10) + 2)
+        rows.append([a, u, 2.0 + 0.5 * a + 1.5 * u])
+    return rows
+
+
+_SOLVE_EQ_TABLE = [
+    ["输出", "类型", "表达式"],
+    ["OutputY1", "前向方程", "OutputY1 = 2 + 0.5*IncomingA + 1.5*VariableU1"],
+    ["OutputY1", "反解公式", "VariableU1 = (OutputY1 - 2 - 0.5*IncomingA) / 1.5"],
 ]
 
 

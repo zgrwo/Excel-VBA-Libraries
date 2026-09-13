@@ -897,6 +897,90 @@ def main():
         except Exception as e:
             t.warn("PivotUtils", "CrossJoin", f"ERROR: {str(e)[:80]}")
 
+        # ===== 16. SolveUtils =====
+        print("\n=== 16. SolveUtils ===")
+        solve_hist = [["IncomingA", "VariableU1", "OutputY1"]]
+        for i in range(1, 11):
+            a = float(i)
+            u = float(((i * 3) % 10) + 2)
+            solve_hist.append([a, u, 2.0 + 0.5 * a + 1.5 * u])
+        try:
+            t.ws.UsedRange.ClearContents()
+            write_range(t.ws, solve_hist, 1, 1)
+            write_range(t.ws, [[10.0, None, 13.0]], len(solve_hist) + 1, 1)
+            nr = len(solve_hist) + 1
+            rng_solve = t.ws.Range(t.ws.Cells(1, 1), t.ws.Cells(nr, 3))
+            inv = t.call("SolveUtils.UDF_SOLVE_INVERSE", rng_solve)
+            t.ok("SolveUtils", "Inverse_Recommendation", float(inv[1][1]), 4.0, 1e-4)
+            t.ok("SolveUtils", "Inverse_Prediction", float(inv[1][2]), 13.0, 1e-6)
+            t.ok("SolveUtils", "Inverse_Status_Reachable", str(inv[1][4]), "可达")
+
+            t.ws.Cells(nr, 3).Value = 1000.0
+            inv2 = t.call("SolveUtils.UDF_SOLVE_INVERSE", rng_solve)
+            t.ok("SolveUtils", "Inverse_Status_Unreachable", str(inv2[1][4]), "不可达")
+        except Exception as e:
+            t.warn("SolveUtils", "inverse", f"ERROR: {str(e)[:120]}")
+
+        try:
+            t.ws.UsedRange.ClearContents()
+            write_range(t.ws, solve_hist, 1, 1)
+            nr_h = len(solve_hist)
+            rng_hist = t.ws.Range(t.ws.Cells(1, 1), t.ws.Cells(nr_h, 3))
+
+            q = t.call("SolveUtils.UDF_SOLVE_QUALITY", rng_hist, "linear", 42)
+            t.ok("SolveUtils", "Quality_Candidate", str(q[1][1]), "linear")
+            t.ok("SolveUtils", "Quality_Scheme", str(q[1][2]), "LOO")
+            t.ok("SolveUtils", "Quality_R2", float(q[1][3]), 1.0, 1e-9)
+            t.ok("SolveUtils", "Quality_Selected", str(q[1][5]), "是")
+
+            eq = t.call("SolveUtils.UDF_SOLVE_EQUATION", rng_hist, "linear")
+            t.ok("SolveUtils", "Equation_Forward", str(eq[1][2]),
+                 "OutputY1 = 2 + 0.5*IncomingA + 1.5*VariableU1")
+            t.ok("SolveUtils", "Equation_Inverse", str(eq[2][2]),
+                 "VariableU1 = (OutputY1 - 2 - 0.5*IncomingA) / 1.5")
+
+            write_range(t.ws, [[10.0, 4.0], [1.0, 5.0]], nr_h + 1, 1)
+            rng_vals = t.ws.Range(t.ws.Cells(nr_h + 1, 1), t.ws.Cells(nr_h + 2, 2))
+            pv = t.call("SolveUtils.UDF_SOLVE_PREDICT", rng_hist, rng_vals, "linear")
+            t.ok("SolveUtils", "Predict_R1", float(pv[0][0]), 13.0, 1e-8)
+            t.ok("SolveUtils", "Predict_R2", float(pv[1][0]), 10.0, 1e-8)
+
+            # R4-21: poly Range 路径 + auto 质量选择 (此前仅 linear)
+            t.ws.UsedRange.ClearContents()
+            poly_rows = [["IncomingA", "VariableU1", "OutputY1"]]
+            for i in range(1, 31):
+                a = 0.4 + 0.8 * (((i * 37 + 11) % 97) / 97.0)
+                b = 0.4 + 0.8 * (((i * 53 + 7) % 89) / 89.0)
+                y = 1.0 + 2.0 * a - b + 0.5 * a * a + 0.75 * b * b + 1.25 * a * b
+                poly_rows.append([a, b, y])
+            write_range(t.ws, poly_rows, 1, 1)
+            nrp = len(poly_rows)
+            rngp = t.ws.Range(t.ws.Cells(1, 1), t.ws.Cells(nrp, 3))
+            write_range(t.ws, [[0.7, 1.3]], nrp + 1, 1)
+            rngv = t.ws.Range(t.ws.Cells(nrp + 1, 1), t.ws.Cells(nrp + 1, 2))
+            pv2 = t.call("SolveUtils.UDF_SOLVE_PREDICT", rngp, rngv, "poly")
+            aa, bb = 0.7, 1.3
+            exp_poly = 1.0 + 2.0 * aa - bb + 0.5 * aa * aa + 0.75 * bb * bb + 1.25 * aa * bb
+            t.ok("SolveUtils", "Predict_Poly_Range", float(pv2[0][0]), exp_poly, 1e-4)
+
+            qa = t.call("SolveUtils.UDF_SOLVE_QUALITY", rngp, "auto", 42)
+            sel = sum(1 for row in qa[1:] if str(row[5]) == "是")
+            t.ok("SolveUtils", "Quality_Auto_SelectedOne", float(sel), 1.0, 0.0)
+        except Exception as e:
+            t.warn("SolveUtils", "reports", f"ERROR: {str(e)[:120]}")
+
+        try:
+            # Negative: no Variable column → UDF returns CVErr (#VALUE!)
+            rng_bad = t._range([["IncomingA", "OutputY1"], [1.0, 10.0], [2.0, 20.0]], row=1)
+            try:
+                res = t.call("SolveUtils.UDF_SOLVE_INVERSE", rng_bad)
+                is_err = isinstance(res, int) and res < 0
+            except Exception:
+                is_err = True
+            t.ok("SolveUtils", "Inverse_NoVariable_CVErr", is_err, True)
+        except Exception as e:
+            t.warn("SolveUtils", "negative", f"ERROR: {str(e)[:120]}")
+
         # ===== Summary =====
         return 0 if t.summarize() else 1
 

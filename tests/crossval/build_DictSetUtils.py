@@ -295,6 +295,17 @@ TEST_CASES = [
     {"name": "SetCartesianProduct_single_each", "func": "SetCartesianProduct",
      "args": lambda: (["A"], ["B"]),
      "py_ref": lambda a: [["A", "B"]], "result_type": "array"},
+
+    # 2026-09-13 R4-17 回归: 标量入参 = 单元素集合 (此前被当作空集)
+    {"name": "SetIntersect_scalar_first", "func": "SetIntersect",
+     "args": lambda: (1, [1, 2]),
+     "py_ref": lambda a: [1], "result_type": "array"},
+    {"name": "SetIsSubset_scalar", "func": "SetIsSubset",
+     "args": lambda: (2, [1, 2, 3]),
+     "py_ref": lambda a: True, "result_type": "bool"},
+    {"name": "SetIsSubset_scalar_absent", "func": "SetIsSubset",
+     "args": lambda: (9, [1, 2, 3]),
+     "py_ref": lambda a: False, "result_type": "bool"},
 ]
 
 

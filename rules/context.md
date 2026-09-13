@@ -8,7 +8,7 @@
 **VBA-Core** — 类模块基础层，提供共享数据结构与操作。包含 VariantKit（类型安全包装）、ArrayOps（数组操作）、DictProxy（字典代理）。所有 src/ 模块依赖 VBA-Core，导入顺序固定：VariantKit → ArrayOps → DictProxy。
 _Avoid_: 核心层、基础库、Utils
 
-**src/** — 15 个独立标准模块（.bas），每个模块功能内聚，模块间相互独立（仅 RegressUtils 例外：依赖 LinearUtils + StatsUtils）。
+**src/** — 16 个独立标准模块（.bas），每个模块功能内聚，模块间相互独立（例外：RegressUtils 依赖 LinearUtils + StatsUtils；SolveUtils 依赖 LinearUtils）。
 _Avoid_: 函数库、模块集
 
 **VariantKit** — VBA-Core 的 Variant 类型安全包装类。提供类型检测（IsNumber/IsText/IsBool/IsDate）、类型转换（ToDouble/ToLong/ToString）、哨兵处理（Null/Empty/Error 统一转对应零值）。
@@ -75,14 +75,28 @@ _Avoid_: 链接检查、引用验证
 
 ## 开发术语
 
-**VBA-Core 接口冻结** — VBA-Core 类模块（VariantKit/ArrayOps/DictProxy）的 Public 接口禁止修改，除非用户明确要求。15 个 src/ 模块全部依赖这些接口，修改会造成连锁回归。
+**VBA-Core 接口冻结** — VBA-Core 类模块（VariantKit/ArrayOps/DictProxy）的 Public 接口禁止修改，除非用户明确要求。16 个 src/ 模块全部依赖这些接口，修改会造成连锁回归。
 _Avoid_: 接口锁定、核心层保护
 
-**模块独立性** — 15 个 src/ 模块相互独立设计原则：每个模块可独立测试、独立替换、独立迁移。不共享内部状态，仅通过明确接口通信。这是未来 VBA→Office Scripts 逐模块迁移的基础。
+**模块独立性** — 16 个 src/ 模块相互独立设计原则：每个模块可独立测试、独立替换、独立迁移。不共享内部状态，仅通过明确接口通信。这是未来 VBA→Office Scripts 逐模块迁移的基础。
 _Avoid_: 模块解耦、独立部署
 
 **导入顺序** — VBA-Core 类模块的固定导入顺序：VariantKit → ArrayOps → DictProxy。ArrayOps 依赖 VariantKit，DictProxy 依赖两者。违反顺序导致编译错误。
 _Avoid_: 加载顺序、依赖顺序
+
+## 领域术语（SOLVE 反解）
+
+**反解 (Inverse)** — 给定输出目标 y*，在可调参数边界内搜索使之达成的参数组合；与前向预测（参数→输出）相对。`UDF_SOLVE_INVERSE` 返回推荐表。
+_Avoid_: 逆运算、参数优化
+
+**请求行 (Request Row)** — 数据表中可调参数列为空（或非数值）、来料列必须已知且数值化的行；其输出列的非空值构成反解目标。单独传入 request 表时数据表必须为纯历史。
+_Avoid_: 目标行、待求行
+
+**可达性 (Reachability)** — 目标值是否落在边界内采样所得输出区间内的判定；采用相对容差 `1e-9 × max(|min|,|max|,|max−min|)`，避免绝对 epsilon 在微尺度数据上误判。
+_Avoid_: 可行性、有解性
+
+**最大偏差σ (Max Deviation σ)** — `maxⱼ |ŷⱼ − y*ⱼ| / sⱼ`，其中 `sⱼ` 为输出 j 的历史样本标准差（0 → 1）；0 表示完全命中目标。
+_Avoid_: 残差、误差
 
 ## 平台术语
 

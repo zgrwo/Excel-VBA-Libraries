@@ -18,6 +18,7 @@ When Excel's built-in functions fall short or pure VBA implementation is too com
 - **Date Calculations** — ISO week numbers, workdays, age, Unix timestamp conversion
 - **File Batch Processing** — UTF-8 read/write, folder traversal, batch merge
 - **PhysChem** — molecular weight from formula, unit conversion (volume/pressure/temperature), ideal gas standard state
+- **Process Inversion (SOLVE)** — hit output targets by solving adjustable process parameters (linear/poly models, cross-validated auto selection, reachability status)
 - **Report Export** — one-click export worksheet ranges to HTML / JSON / Markdown
 
 ## Key Advantages
@@ -67,12 +68,12 @@ result = ArraySort(Array(3, 1, 4, 1, 5), True)  ' → Array(1, 1, 3, 4, 5)
 
 ## Module Overview
 
-15 modules across 6 layers. See [AGENTS.md](AGENTS.md) for the full structure with dependencies.
+16 modules across 6 layers. See [AGENTS.md](AGENTS.md) for the full structure with dependencies.
 
 | Layer | Modules |
 |------|------|
 | Data | ArrayUtils, DictSetUtils, PivotUtils, SqlUtils |
-| Statistics/Math | LinearUtils, StatsUtils, RegressUtils |
+| Statistics/Math | LinearUtils, StatsUtils, RegressUtils, SolveUtils |
 | Text | StringUtils, RegexUtils, JsonUtils, XmlUtils |
 | Date | DateTimeUtils |
 | Excel/File | RangeUtils, FileSystemUtils |

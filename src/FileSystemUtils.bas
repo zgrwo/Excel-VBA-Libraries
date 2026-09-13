@@ -528,7 +528,7 @@ ErrHandler:
     End If
     ' 如果内容包含非 ANSI 字符则重新抛出 — WriteANSI 回退会损坏它们
     For i = 1 To Len(content)
-        If AscW(Mid$(content, i, 1)) > 255 Then
+        If (AscW(Mid$(content, i, 1)) And &HFFFF&) > 255 Then
             Err.Raise errNum, "WriteTextFile", errDesc & " (content contains Unicode characters; ADODB unavailable)"
         End If
     Next i
@@ -602,7 +602,7 @@ ErrHandler:
     End If
     ' 如果内容包含非 ANSI 字符则重新抛出 — ANSI 回退会损坏它们
     For i = 1 To Len(content)
-        If AscW(Mid$(content, i, 1)) > 255 Then
+        If (AscW(Mid$(content, i, 1)) And &HFFFF&) > 255 Then
             Err.Raise errNum, "WriteTextFileAppend", "Unicode characters in content; ADODB unavailable"
         End If
     Next i
@@ -636,7 +636,7 @@ ErrHandler:
     End If
     ' 如果内容包含非 ANSI 字符则重新抛出 — ANSI 回退会损坏它们
     For i = 1 To Len(content)
-        If AscW(Mid$(content, i, 1)) > 255 Then
+        If (AscW(Mid$(content, i, 1)) And &HFFFF&) > 255 Then
             Err.Raise errNum, errSrc, "WriteUnicode: Unicode characters in content; ADODB unavailable"
         End If
     Next i

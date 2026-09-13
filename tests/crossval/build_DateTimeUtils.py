@@ -51,6 +51,30 @@ def _py_easter(year):
     return date(year, month, day)
 
 
+def _daysinmonth_err_probe(excel, wb, ws, runner, tc, args):
+    """R4-19: 非法序列号必须在 VBA 内部捕获错误 (错误不穿透 COM)。"""
+    from tests.test_utils import run_macro
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == "DtR4Probe":
+            vbproj.VBComponents.Remove(comp)
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = "DtR4Probe"
+    comp.CodeModule.AddFromString(
+        "Option Explicit\r\n"
+        "Public Function Probe() As Double\r\n"
+        "    On Error GoTo EH\r\n"
+        "    Dim v As Variant\r\n"
+        "    v = DaysInMonth(0)\r\n"
+        "    Probe = 0\r\n"
+        "    Exit Function\r\n"
+        "EH:\r\n"
+        "    Probe = 1\r\n"
+        "End Function")
+    val = run_macro(excel, wb, "DtR4Probe.Probe")
+    return float(val), 1.0, 0.0
+
+
 # =============================================================================
 # Test Cases
 # =============================================================================
@@ -435,6 +459,23 @@ TEST_CASES = [
      "result_type": "array", "tol": 1.0,
      "skip_if": True,
      "skip_reason": "COM无法传递Python datetime.date对象，VBA函数行为正确"},
+
+    # =====================================================================
+    # 2026-09-13 第四轮审查回归 (R4-19/R4-20)
+    # =====================================================================
+
+    # R4-19: 单数值按 Excel 日期序列号解释 (2024 → 1905-07-15, 31 天)
+    {"name": "DaysInMonth_numeric_serial", "func": "DaysInMonth",
+     "args": lambda: (2024,), "py_ref": lambda a: 31, "result_type": "scalar"},
+    # R4-19: 非法序列号必须报错, 不得静默返回当前月 (VBA 内捕获)
+    {"name": "DaysInMonth_invalid_serial", "func": "DaysInMonth",
+     "args": lambda: (), "reconstruct": _daysinmonth_err_probe,
+     "py_ref": lambda a: 1.0},
+    # R4-20: 数字序列号数组必须被识别为假日
+    {"name": "IsHoliday_numeric_serial_array", "func": "IsHoliday",
+     "args": lambda: (_dt(2024, 12, 25),
+                      [float((date(2024, 12, 25) - date(1899, 12, 30)).days)]),
+     "py_ref": lambda a: True, "result_type": "bool"},
 
 ]
 

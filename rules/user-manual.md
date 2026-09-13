@@ -39,6 +39,10 @@
   - [Recipe 7.1 — 因子重要性分析](#recipe-factor-importance)
   - [Recipe 7.2 — 单因素方差分析](#recipe-one-way-anova)
   - [Recipe 7.3 — 因子优化](#recipe-factor-optimization)
+- **Chapter 16: SolveUtils — 工艺参数反解**
+  - [Recipe 16.1 — 三步反解](#recipe-solve-inverse)
+  - [Recipe 16.2 — 模型质量体检](#recipe-solve-quality)
+  - [Recipe 16.3 — 预测与方程](#recipe-solve-predict-equation)
 
 ### 第三部分：文本与数据格式
 
@@ -1002,6 +1006,8 @@ result = SetUnion(Array(1, 2, 3), Array(3, 4, 5))
 =UDF_DICT_UNION(arr1, arr2)
 ```
 
+> 集合运算的入参：单格/标量按单元素集合处理；`Empty`/`Null` 按空集处理。
+
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | arr1 | Range | 第一个区域 |
@@ -1574,7 +1580,7 @@ Unpivot rng, valueCols, nameCol, valCol, destCell, [idColIndices]
 
 #### GroupBy
 
-分组聚合。支持 SUM/COUNT/AVG/MIN/MAX。跳过 Null/Error/非数值。
+分组聚合。支持 SUM/COUNT/AVG/MIN/MAX。跳过 Null/Error/空白与非数值聚合值（COUNT 除外）。
 
 **VBA Usage**
 ```vb
@@ -2946,7 +2952,7 @@ PercentRank(data, value, [ascending], [colIndex]) As Variant
 <a id="binning"></a>
 #### ZScore / Normalize / LinInterp / Winsorize / MovingAverage / Binning
 
-数据变换工具。ZScore 传入单值返回单 Z 分数，否则返回全数组；Normalize 为 Min-Max 归一化；LinInterp 在已排序 xs、ys 间线性插值；Winsorize 压缩极端值；MovingAverage 为简单移动平均；Binning 为等宽分箱 (仅 VBA 返回 Dictionary)。
+数据变换工具。ZScore 传入单值返回单 Z 分数，否则返回全数组（`value` 非缺省时必须为数值，布尔/文本/错误值会报错）；Normalize 为 Min-Max 归一化；LinInterp 在已排序 xs、ys 间线性插值；Winsorize 压缩极端值；MovingAverage 为简单移动平均；Binning 为等宽分箱 (仅 VBA 返回 Dictionary)。
 
 **VBA Usage**
 ```vb
@@ -3316,7 +3322,7 @@ interact = InteractionEffects(dataRange, Array(1,2,3,4), 5)
 
 #### OptimizeFactors
 
-网格搜索最优因子组合。对数值因子在 observed range 内生成 nSteps 个离散点，布尔因子枚举 {0,1}，分类因子枚举所有水平。搜索空间上限 MAX_GRID_COMBOS=200k。goal="max" 最大化，"min" 最小化，或传入数值做目标逼近。
+网格搜索最优因子组合。对数值因子在 observed range 内生成 nSteps 个离散点，布尔因子枚举 {0,1}，分类因子枚举所有水平。搜索空间上限 MAX_GRID_COMBOS=200k。goal="max" 最大化，"min" 最小化，或传入数值做目标逼近；其他字符串值报错。
 
 **VBA Usage**
 ```vb
@@ -4599,6 +4605,9 @@ n = Quarter(#2024-07-15#)               ' → 3
 n = FiscalYear(#2025-12-15#, 7)         ' → 2026 (7 月起)
 ```
 
+> 单参数 `DaysInMonth(x)`：`x` 为日期、日期字符串或 Excel 日期序列号（纯数值按序列号解释，如 2024 → 1905-07-15）；
+> 无参数返回当月天数；非法/越界序列号报错。
+
 **UDF Usage**
 ```
 =UDF_DT_DAYSINMONTH(year, month)   =UDF_DT_DAYSINYEAR(year)
@@ -4733,6 +4742,7 @@ d = NextWorkday(#2025-06-11#, 3)                  ' → 2025-06-16 (跳过周末
 #### IsWeekend / IsHoliday
 
 IsWeekend 判断是否为周六或周日；IsHoliday 判断是否在指定节假日列表中。
+`holidays` 支持 Range、数组或 Dictionary；数组/Range 中的日期、日期字符串与数值序列号均可识别。
 
 ```vb
 IsWeekend(dt) As Boolean
@@ -5030,7 +5040,7 @@ NamedRangeExists("MyData")  ' → True
 
 #### FilterRangeToArray
 
-按列筛选区域，返回满足条件的行组成的 2D 数组。支持 `=`, `<`, `>`, `<=`, `>=`, `<>`, `contains`, `regex`。
+按列筛选区域，返回满足条件的行组成的 2D 数组。支持 `=`、`<>`、`<`、`<=`、`>`、`>=`、`contains`、`notcontains`、`startswith`、`endswith`、`isblank`、`isnotblank`、`regex`；未知运算符报错。
 
 **VBA Usage**
 ```vb
@@ -5743,4 +5753,197 @@ V_std = CylinderStdVolumeFromMass(25, "CO2")            ' 25kg CO2 钢瓶标态�
 ```
 
 ---
+
+## Chapter 16: SolveUtils — 工艺参数反解 (SOLVE.*)
+
+工艺参数反解工具：给定历史数据与输出目标，反推可调参数取值，并给出前向预测、模型质量与方程文本。**模块**: `SolveUtils.bas`
+
+**Quick Reference**
+
+| 函数 | 参数 | 说明 | 返回值 |
+|------|------|------|--------|
+| [`UDF_SOLVE_INVERSE`](#udf_solve_inverse) | `(data, [request], [bounds], [model], [seed], [max_starts])` | 目标反推可调参数（推荐表） | Variant(,) |
+| [`UDF_SOLVE_PREDICT`](#udf_solve_predict) | `(data, values, [model])` | 前向预测（N×M 数值矩阵） | Variant(,) |
+| [`UDF_SOLVE_QUALITY`](#udf_solve_quality) | `(data, [model], [seed])` | 交叉验证质量表 | Variant(,) |
+| [`UDF_SOLVE_EQUATION`](#udf_solve_equation) | `(data, [model])` | 前向方程 + 闭式反解公式 | Variant(,) |
+
+| Recipe | Functions Used |
+|--------|---------------|
+| [三步反解](#recipe-solve-inverse) | `UDF_SOLVE_INVERSE` |
+| [模型质量体检](#recipe-solve-quality) | `UDF_SOLVE_QUALITY` |
+| [预测与方程](#recipe-solve-predict-equation) | `UDF_SOLVE_PREDICT`, `UDF_SOLVE_EQUATION` |
+
+### 数据约定（表头前缀）
+
+反解表通过表头**前缀**识别列角色（大小写不敏感，中英文均可）：
+
+| 前缀 | 角色 | 示例 |
+|------|------|------|
+| `Incoming*` / `来料*` | 来料条件（请求行必须给出数值） | `IncomingA`、`来料温度` |
+| `Variable*` / `可调*` / `变量*` | 可调参数（请求行留空即为反解对象） | `VariableU1`、`可调风量` |
+| `Fixed*` / `固定*` | 固定条件（历史空白按列中位数填补） | `FixedCatalyst` |
+| `Output*` / `输出*` | 输出目标 | `OutputY1`、`输出收率` |
+
+- **行分类**：可调列全部为数值 → 历史行；可调列有空 → **请求行**（其输出列非空值即目标）。
+- **独立请求表**：用 `request` 参数传请求表时，`data` 必须为纯历史表；请求表表头需与数据表匹配。
+- **模型**：`auto`（默认，按交叉验证 R² 择优）、`linear`、`poly`（含二次项与两两交互；poly 用岭回归 λ=1e-5 保数值稳定）。
+- **边界**：`bounds` 默认取历史 min/max；支持 2 列（按可调顺序）或 3 列（`变量名/序号, 下界, 上界`）。
+
+**规模上限**（超限返回 `#VALUE!`）：历史 2000 行、请求 100 行、特征 30 列、可调 10 列、输出 10 列、`max_starts` 1–20（默认 10）。
+
+<a id="recipe-solve-inverse"></a>
+<a id="udf_solve_inverse"></a>
+### Recipe 16.1 — 三步反解
+
+**场景**: 某工艺历史数据表明输出 `OutputY1 = 2 + 0.5·IncomingA + 1.5·VariableU1`。现来料 A=10，希望输出达到 13，求可调参数 U1。
+
+**第一步**：把历史数据与请求行放入工作表（`VariableU1` 留空表示待反解，输出列填目标值 13）：
+
+|   | A | B | C |
+|---|---|---|---|
+| 1 | IncomingA | VariableU1 | OutputY1 |
+| 2 | 1 | 5 | 10 |
+| 3 | 2 | 8 | 15 |
+| 4 | 3 | 11 | 20 |
+| 5 | 4 | 4 | 10 |
+| 6 | 5 | 7 | 15 |
+| 7 | 6 | 10 | 20 |
+| 8 | 7 | 3 | 10 |
+| 9 | 8 | 6 | 15 |
+| 10 | 9 | 9 | 20 |
+| 11 | 10 | 2 | 10 |
+| 12 | 10 | *(空)* | 13 |
+
+**第二步**：输入公式
+
+```
+=UDF_SOLVE_INVERSE(A1:C12)
+```
+
+**第三步**：读取推荐表
+
+| 请求行 | VariableU1 | OutputY1预测 | 最大偏差σ | 状态 |
+|--------|-----------|-------------|-----------|------|
+| 数据第12行 | 4.0 | 13.0 | ≈0 | 可达 |
+
+闭式验证：`2 + 0.5×10 + 1.5×4 = 13` ✓。`最大偏差σ = maxⱼ |ŷⱼ−y*ⱼ|/sⱼ`（`sⱼ` 为输出 j 的历史样本标准差，0 → 1）；`可达/不可达` 由边界内采样区间与相对容差 `1e-9 × max(|min|,|max|,|max−min|)` 判定。
+
+**进阶用法**
+
+```
+' 独立请求表（data 必须为纯历史，request 表含同样的角色前缀表头）
+=UDF_SOLVE_INVERSE(A1:C11, E1:G3)
+
+' 指定边界表（变量名, 下界, 上界）
+=UDF_SOLVE_INVERSE(A1:C12, , J1:L2)
+
+' 指定模型与随机种子、起点数
+=UDF_SOLVE_INVERSE(A1:C12, , , "linear", 42, 20)
+```
+
+**VBA Usage**
+```vb
+SolveInverse(data, request, bounds, model, seed, maxStarts) As Variant
+```
+```vb
+tbl = SolveInverse(ws.Range("A1:C12").Value, Empty, Empty, "auto", 42, 10)
+rec = tbl(2, 2)        ' → 4.0（推荐值）
+pred = tbl(2, 3)       ' → 13.0（预测输出）
+status = tbl(2, 5)     ' → "可达"
+```
+
+**UDF Usage**
+```
+=UDF_SOLVE_INVERSE(data, [request], [bounds], [model], [seed], [max_starts])
+```
+
+<a id="recipe-solve-quality"></a>
+<a id="udf_solve_quality"></a>
+### Recipe 16.2 — 模型质量体检
+
+**场景**: 反解前先确认哪个候选模型更可靠。对纯历史表（上表 A1:C11）运行：
+
+```
+=UDF_SOLVE_QUALITY(A1:C11, "auto", 42)
+```
+
+返回 `[输出, 候选, CV方案, CV_R2, CV_MAE, 选用]`：
+
+| 输出 | 候选 | CV方案 | CV_R2 | CV_MAE | 选用 |
+|------|------|--------|-------|--------|------|
+| OutputY1 | linear | LOO | 1.000000 | ≈0 | 是 |
+| OutputY1 | poly | LOO | 1.000000 | ≈0 | 否 |
+
+- `n ≥ 20` 用 **5折**，`5 ≤ n < 20` 用 **LOO**；`n < 5` 返回 `#VALUE!`。
+- `auto` 按 CV R² 择优（差 < 1e-9 时保守选 `linear`）；poly 结构不可用（展开 > 100 项或训练折不足）时该行显示 `跳过`。
+- 指定模型时只返回一行：`=UDF_SOLVE_QUALITY(A1:C11, "linear")`。
+
+**VBA Usage**
+```vb
+SolveQuality(data, model, seed) As Variant
+```
+
+**UDF Usage**
+```
+=UDF_SOLVE_QUALITY(data, [model], [seed])
+```
+
+<a id="recipe-solve-predict-equation"></a>
+<a id="udf_solve_predict"></a>
+<a id="udf_solve_equation"></a>
+### Recipe 16.3 — 预测与方程
+
+**场景**: 推荐参数下发前，用前向预测复核；用方程文本归档工艺知识。
+
+**前向预测**：把完整参数行（来料 + 可调 + 固定，顺序与数据特征列一致）写入空白区域，例如 E14:F15：
+
+|   | E | F |
+|---|---|---|
+| 14 | 10 | 4 |
+| 15 | 1 | 5 |
+
+```
+=UDF_SOLVE_PREDICT(A1:C11, E14:F15, "linear")
+```
+
+返回 2×1 数值矩阵：`13`（A=10,U=4）与 `10`（A=1,U=5）。
+
+**方程文本**：
+
+```
+=UDF_SOLVE_EQUATION(A1:C11, "linear")
+```
+
+| 输出 | 类型 | 表达式 |
+|------|------|--------|
+| OutputY1 | 前向方程 | `OutputY1 = 2 + 0.5*IncomingA + 1.5*VariableU1` |
+| OutputY1 | 反解公式 | `VariableU1 = (OutputY1 - 2 - 0.5*IncomingA) / 1.5` |
+
+- 系数使用 `G6` 有效数字格式（区域无关，`.` 小数点）。
+- **反解公式仅当模型为 `linear` 且恰有 1 个可调列、该列系数非零时给出**；其他情况只输出前向方程。
+- **秩亏（特征共线）时可能追加 `备注` 行**：说明部分系数不可辨识（已置 0），建议改用岭回归或移除冗余特征。
+- `auto` 下方程与预测按 42 号种子重新拟合（与 `UDF_SOLVE_QUALITY` 的 CV 结论一致）。
+
+**VBA Usage**
+```vb
+SolvePredict(data, values, model) As Variant
+SolveEquation(data, model) As Variant
+```
+
+**UDF Usage**
+```
+=UDF_SOLVE_PREDICT(data, values, [model])
+=UDF_SOLVE_EQUATION(data, [model])
+```
+
+### 说明与限制
+
+- **v1 范围**：`model` 支持 `auto` / `linear` / `poly`；`rate` / `rate_poly`（时间列速率模型）与 `SharedOutput*` 池化留待 v2。
+- **双路径**：四个 UDF 与核心函数均同时接受 Range 与 Variant 数组；UDF 失败统一返回 `#VALUE!`，核心 `Solve*` 函数以 `Err.Raise`（`vbObjectError+16xx`）报告。
+- **确定性**：`seed` 默认 42；相同 seed 与输入下，推荐值、折序与采样逐位可复现（XorShift64*）。
+- **多输出**：每个 `Output*` 列独立拟合与判定；`UDF_SOLVE_QUALITY`/`UDF_SOLVE_EQUATION` 每输出一行（方程每输出两行）。
+- **性能**：建议 n ≤ 1000、可调 ≤ 3、请求 ≤ 5（VBA 无异步；大表请拆分）。超限显式 `#VALUE!`。
+
+---
+
 

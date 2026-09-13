@@ -445,9 +445,12 @@ Private Function ArrayToSet(ByRef arr As Variant) As Object
     VK.NormalizeInput localArr, True  ' Range→Array + 2D→1D (local copy — §1.1)
 
     ' 先初始化 — 确保非数组早退路径返回空字典而非 Nothing (修复 H4)。
-    ' 在 IsArray 之前分配是故意的: 标量输入需返回空字典而非 Nothing。
+    ' 标量输入 = 单元素集合; Empty/Null (缺省) = 空集。
     Set result = DP.Create()
     If Not IsArray(localArr) Then
+        If Not IsEmpty(localArr) And Not IsNull(localArr) Then
+            result.Add DictKey(localArr), localArr
+        End If
         Set ArrayToSet = result
         Exit Function
     End If
@@ -464,24 +467,19 @@ End Function
 
 ' SetUnion — 并集
 Public Function SetUnion(ByRef arr1 As Variant, ByRef arr2 As Variant) As Variant
-    Dim dict As Object
+    Dim dict As Object, set2 As Object
     Dim result() As Variant
     Dim i As Long, v As Variant
-    Dim k As String, lb2 As Long, ub2 As Long
 
     Set dict = ArrayToSet(arr1)
-    ' 将 arr2 归一化后合并到 dict（与 ArrayToSet 一致的归一化路径）
-    Dim localArr2 As Variant: localArr2 = arr2
-    VK.NormalizeInput localArr2, True
-    If IsArray(localArr2) Then
-        lb2 = LBound(localArr2): ub2 = UBound(localArr2)
-        For i = lb2 To ub2
-            k = DictKey(localArr2(i))
-            If Not dict.Exists(k) Then
-                dict.Add k, localArr2(i)
-            End If
-        Next i
-    End If
+    ' arr2 走同一归一化路径 (标量 → 单元素集合, Empty/Null → 空集)
+    Set set2 = ArrayToSet(arr2)
+    For Each v In set2.Keys
+        If Not dict.Exists(CStr(v)) Then
+            dict.Add CStr(v), set2(v)
+        End If
+    Next v
+    Set set2 = Nothing
 
     If dict.Count = 0 Then
         result = Array()

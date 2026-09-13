@@ -4,6 +4,12 @@ All notable changes to Excel VBA Libraries.
 
 ## [Unreleased] — 2026-09-13
 
+### Added（SOLVE 工艺参数反解 v1）
+
+- **SolveUtils（第 16 个 `src/` 模块）**: `UDF_SOLVE_INVERSE`（给定输出目标反推可调参数：有界多起点模式搜索 + 可达性判定）、`UDF_SOLVE_PREDICT`（前向预测）、`UDF_SOLVE_QUALITY`（5 折/LOO 交叉验证质量表）、`UDF_SOLVE_EQUATION`（前向方程 + 单可调线性闭式反解）。自动模型选择 `auto`/`linear`/`poly`（poly 岭回归 λ=1e-5）、确定性 XorShift64*（`seed` 默认 42）、角色前缀（`Incoming*`/`来料*`、`Variable*`/`可调*`/`变量*`、`Fixed*`/`固定*`、`Output*`/`输出*`）、独立 request 表与边界表、规模上限（历史 2000 行/请求 100/特征 30/可调 10/输出 10）。依赖 `LinearUtils`（第二个合法依赖例外，已登记）
+- **测试**: `tests/crossval/build_SolveUtils.py` 11 个独立 Python 参考用例（numpy lstsq/闭式解/G6 文本）；集成测试 Range 路径 13 例（INVERSE 精确夹具/不可达/QUALITY/EQUATION/PREDICT/负例 CVErr）
+- **文档**: `rules/api-reference.md` SolveUtils 表与计数头（16 模块 541 Functions）、README CN/EN 模块速览、AGENTS/context/specification/project-structure 16 模块与依赖例外同步
+
 ### Fixed（第三轮全量深度审查修复批）
 
 - **JsonUtils**: 空 JSON 数组改返回已分配 0 长度数组（修复 `JsonStringify(JsonParse("[]"))`/`JsonGetKeys("[]")`/`JsonToRange "[]"`/`JsonGet("[]","[0]")` 全链路 Error 9）；`JsonStringify`/`UDF_JSON_STRINGIFY` 归一化 Range 输入（不再输出字面量 `"Range"`）；`JsonGet` 支持已解析 Dictionary 输入（parse-once/query-many）；字符串内未转义控制字符按 RFC 8259 §7 拒绝；指数溢出改模块错误码（`9e308` 不再裸 Error 6）
@@ -24,9 +30,28 @@ All notable changes to Excel VBA Libraries.
 - **FileSystemUtils**: `CollectFolders` 枚举错误不再静默吞没（与 CollectFiles 一致）
 - **测试基建**: 交叉验证通过率剔除 SKIP 并输出 effective rate/NO RUNS；`run_all_tests` 注入改为守卫式（断言失败写 FAIL 行，不再静默）；`validate_docs` 计数头/AUTO_COUNTS 与锚点检查实做、`analyze_test_gaps` 跳过 skip 用例并将无覆盖模块判 FAIL；集成测试 `FitOLS` 用例修复数据别名；数组比较补形状断言；新增 20+ 条回归用例（JSON 负例探针、TextJoin 2D、HTMLDecode、Controls、TInv2T/GammaLn/高偏置、RangeToMatrix、FS 通配符/混合 UNC、Xml 2D colNames 等）
 
+### Fixed（第四轮全量审查修复批 — SOLVE 移植后，2026-09-13）
+
+> 报告 `.claude/reviews/CODE_REVIEW_2026-09-13_R4.md`（22 项：12 High / 10 Medium，无 Critical；含 1 项驳回、1 项降级）。
+> 修复后回归：一致性验证 ALL PASS / lint 0 Warning / 交叉验证 19 模块 0 FAIL / 集成 109P-0F / 新增 30+ 回归用例。
+
+- **JsonUtils**: 慢速路径 `AscW` 有符号比较修复（`And &HFFFF&`）——转义序列后的代理对/高位 BMP（emoji、U+FFFD）不再被误判为控制字符（R4-05，第三轮修复引入的近期回归）；同族站点 `FileSystemUtils`（3 处非 ANSI 检测）与 `StringUtils.URLDecode` 一并修复
+- **RegexUtils**: UDF 标量路径错误值不再 `CStr` 字符串化（错误输入返回 `#VALUE!`，此前 `#DIV/0!` 会得到 `TRUE`/计数 1）；核心 `RegexCount` 增加 `IsError` 守卫；新增 `RegexEnsure2D` 使 1D Variant 数组路径可用（此前 Error 9/13）（R4-03/R4-06）
+- **RegressUtils**: `InteractionEffects` 2D 首维 `ReDim Preserve` 修复（单水平分类因子不再 Error 9，R4-02）；`LinearModelPredict` 单列 Range 按列内读取（不再越界读取相邻单元格，R4-04）；`OptimizeFactors` 未知 goal 报错（不再静默按 0 分返回，R4-09）；`ANOVAOneWay` 改居中空间累加（修复 `1e13` 量级常数响应假显著 F=12.38/p=4.4e-6，R4-11）；`FitOLS` 新增 `rank`/`rank_deficient` 键暴露秩亏（R4-12）；分类空白行按无效处理（不再静默并入参考水平，R4-14）；分类水平收集改 `vbBinaryCompare`（大小写变体不再错编码，R4-15）；`GetCategoricalLevels`/`EncodePredictRow` 补 Null/Error 守卫（COM 数组传入 Null 不再 Error 94）
+- **SolveUtils**: `SvExpression` 缓冲由 `POLY_TERM_LIMIT` 派生（修复 90 项 poly 方程 `#VALUE!`，R4-01）；schema 定长 UDT 写前容量校验（超限返回限额错误而非 Error 9，R4-07）；`SvFitOLS` 新增 `RankDeficient` 标志并在 `UDF_SOLVE_EQUATION` 输出 `备注` 行（R4-12）；模块头计数 4→8 并登记 `add_module_headers.py`（R4-22）
+- **LinearUtils**: 经济模式 QR 宽矩阵按标准 reduced QR 返回 `R=m×n`（`Q·R=A` 可重构，R4-10）；`EigenSymmetric` 容差内输入显式取对称部分 `(A+Aᵀ)/2`（R4-13，复核降级 Medium）
+- **PivotUtils**: `GroupBy` 空白聚合值跳过（AVG/MIN/MAX 不再按 0 参与，R4-16）
+- **DictSetUtils**: 标量/单格入参按单元素集合（`SetIntersect(1,[1,2])` 不再返回空集、`SetIsSubset` 不再恒 True，R4-17）
+- **RangeUtils**: `FilterRangeToArray` 运算符白名单校验（未知运算符报错，不再静默只返回标题行，R4-18）
+- **DateTimeUtils**: `DaysInMonth` 单数值按 Excel 日期序列号解释（无参仍为当月，越界报错；不再静默返回当前月，R4-19）；`IsHoliday` 识别日期序列号数组/单元格（R4-20）
+- **StatsUtils**: `ZScore` 非法 `value` 报错（不再静默返回全量数组，R4-08）
+- **SqlUtils**: `.xlsm` 需要 `Excel 12.0 Macro` ISAM 的断言经 ACE 实测**驳回**（ACE12/16 以 `Excel 12.0` 可读 .xlsm，KI-028）
+- **测试基建**: SolveUtils 交叉验证新增数组路径/poly/auto/bounds/负例（此前 24 用例全 Range + 全 linear，R4-21）；`analyze_test_gaps` 输出 array/range 路径覆盖并将仅 Range 模块标为 `partial`；负例统一改 **VBA 内直接调用探针**（错误不再穿透 COM，消除 Excel 运行时错误弹窗导致的测试中止）；`ensure_excel` 改晚绑定 `Dispatch`（消除 gencache/makepy 抖动）——全量 19/19 模块 **951P/0F** 稳定通过；新增 Json 转义代理对、Regex 错误值/1D 数组、QR 宽矩阵重构、Eigen 对称化、InteractionEffects 单水平、空白分类/大小写分类、垂直 Range 预测、未知 goal、ANOVA 高偏置、GroupBy 空白、集合标量、未知运算符、DaysInMonth/IsHoliday、ZScore 负例、SolveUtils poly 方程/auto/bounds/限额等 30+ 回归用例
+
 ### Changed
 
 - api-reference.md 补齐 `SqlEscapeString [forLike]`、`XmlGet/XmlGetAttr/XmlToRange [namespaces]` 签名；CN/EN 手册修正 PhyChem 单位（ConvertStandard m³/Pa/K、CylinderStdVolume Pa/K、CompressFactorPR Pa）、DilutionSolve/Density 未知项约定、MinMax 保留参数说明、JsonToRange 签名
+- CN/EN 手册同步第四轮行为：DaysInMonth 单参数序列号语义、IsHoliday 序列号、FilterRangeToArray 运算符全表/未知报错、GroupBy 空白跳过、集合运算标量=单元素集、ZScore value 校验、OptimizeFactors goal 校验、SolveEquation 秩亏备注行
 - sql-SKILL §10 补 ACE LIKE 方括号转义说明；AGENTS.md NormalizeInput 措辞与现状对齐；README.en/specification 版本号同步 2.1.1
 
 ## [2.1.1] — 2026-08-16

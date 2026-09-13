@@ -396,6 +396,13 @@ TEST_CASES += [
     {"name": "JsonStringify_parsed_empty", "func": "JsonParse",
      "args": lambda: ("stringify_empty", 1.0),
      "reconstruct": _json_err_probe, "py_ref": lambda a: 1.0},
+    # R4-05 回归: 转义序列之后的代理对/高位 BMP 不得被 AscW 有符号比较误判为控制字符
+    {"name": "JsonParse_escaped_emoji", "func": "JsonParse",
+     "args": lambda: (r'"a\u0041' + "\U0001F600" + '"',),
+     "py_ref": lambda a: "aA\U0001F600", "result_type": "string"},
+    {"name": "JsonParse_escaped_ufffd", "func": "JsonParse",
+     "args": lambda: (r'"x\u0041' + "\uFFFD" + '"',),
+     "py_ref": lambda a: "xA\uFFFD", "result_type": "string"},
 ]
 
 

@@ -1,6 +1,6 @@
 # AGENTS.md — Excel-VBA-Libraries 项目宪法
 
-> 高性能 VBA 函数库：15 个模块，纯 VBA 实现，零外部依赖。
+> 高性能 VBA 函数库：16 个模块，纯 VBA 实现，零外部依赖。
 > 本文件面向 AI 编程助手，编码细节按需加载 Skill。
 
 ## 元数据
@@ -64,8 +64,8 @@ VBA-Core (类模块)
   VariantKit → ArrayOps → DictProxy（导入时按此顺序）
       ↑ 依赖
 src/ (标准模块)
-  15 个 .bas 模块，相互独立（均依赖 VBA-Core）
-  例外：RegressUtils 依赖 LinearUtils + StatsUtils
+  16 个 .bas 模块，相互独立（均依赖 VBA-Core）
+  例外：RegressUtils 依赖 LinearUtils + StatsUtils；SolveUtils 依赖 LinearUtils
 ```
 
 ## 仓库目录树
@@ -75,7 +75,7 @@ src/ (标准模块)
 ```
 ExcelVBA函数库/
 ├── VBA-Core/                       # 公共基础设施（VariantKit/ArrayOps/DictProxy）
-├── src/                            # 15 个 .bas 标准模块
+├── src/                            # 16 个 .bas 标准模块
 ├── tests/                          # 4 层测试体系（验证/交叉/集成/单元）
 ├── docs/                           # 用户文档 + 二进制工作簿
 ├── scripts/                        # 开发工具脚本（hooks/结构校验）

@@ -16,6 +16,50 @@ MODULE_PATHS = [os.path.join(VBA_CORE_DIR, name + ".cls")
                 for name in VBA_CORE_IMPORT_ORDER]
 MODULE_PATHS.append(os.path.join(SRC_DIR, "RegexUtils.bas"))
 
+
+# 2026-09-13 R4-03/R4-06 回归: 错误值不得字符串化; 1D Variant 数组路径
+def _regex_r4_probe(excel, wb, ws, runner, tc, args):
+    """注入专用 VBA 探针 (在 VBA 内捕获错误, 避免错误变体跨 COM)。"""
+    from tests.test_utils import run_macro
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == "RegexR4Probe":
+            vbproj.VBComponents.Remove(comp)
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = "RegexR4Probe"
+    comp.CodeModule.AddFromString(
+        "Option Explicit\r\n"
+        "Public Function Probe(ByVal which As String) As Double\r\n"
+        "    On Error GoTo EH\r\n"
+        "    Dim v As Variant\r\n"
+        "    If which = \"count_1d\" Then\r\n"
+        "        v = RegexCount(Array(\"a1\", \"b2\"), \"\\d+\")\r\n"
+        "        Probe = CDbl(v)\r\n"
+        "        Exit Function\r\n"
+        "    ElseIf which = \"udf_count_1d\" Then\r\n"
+        "        v = UDF_REGEX_COUNT(Array(\"a1\", \"b2\"), \"\\d+\")\r\n"
+        "        Probe = CDbl(v)\r\n"
+        "        Exit Function\r\n"
+        "    ElseIf which = \"err_count\" Then\r\n"
+        "        v = RegexCount(CVErr(2007), \"\\d+\")\r\n"
+        "        Probe = 0\r\n"
+        "        Exit Function\r\n"
+        "    ElseIf which = \"err_udf\" Then\r\n"
+        "        v = UDF_REGEX_ISMATCH(CVErr(2007), \"\\d+\")\r\n"
+        "        If IsError(v) Then Probe = 1 Else Probe = 0\r\n"
+        "        Exit Function\r\n"
+        "    End If\r\n"
+        "    Probe = -1\r\n"
+        "    Exit Function\r\n"
+        "EH:\r\n"
+        "    If which = \"err_count\" Then Probe = 1 Else Probe = -Err.Number\r\n"
+        "End Function")
+    mode = args[0]
+    val = run_macro(excel, wb, "RegexR4Probe.Probe", mode)
+    expected = {"count_1d": 2.0, "udf_count_1d": 2.0,
+                "err_count": 1.0, "err_udf": 1.0}[mode]
+    return float(val), expected, 0.0
+
 # =============================================================================
 # Test Cases
 # =============================================================================
@@ -323,6 +367,22 @@ TEST_CASES = [
      "result_type": "array", "compare_mode": "bool_array",
      "skip_if": True,
      "skip_reason": "UDF Regex wrapper expects 2D Range input through COM; core RegexIsMatch is covered by crossval tests"},
+
+    # =====================================================================
+    # 2026-09-13 R4 回归: 错误值不得字符串化 (R4-03); 1D 数组路径 (R4-06)
+    # =====================================================================
+    {"name": "RegexCount_1d_array", "func": "RegexCount",
+     "args": lambda: ("count_1d",), "reconstruct": _regex_r4_probe,
+     "py_ref": lambda a: 2.0},
+    {"name": "UDF_COUNT_1d_array", "func": "UDF_REGEX_COUNT",
+     "args": lambda: ("udf_count_1d",), "reconstruct": _regex_r4_probe,
+     "py_ref": lambda a: 2.0},
+    {"name": "RegexCount_error_scalar", "func": "RegexCount",
+     "args": lambda: ("err_count",), "reconstruct": _regex_r4_probe,
+     "py_ref": lambda a: 1.0},
+    {"name": "UDF_ISMATCH_error_scalar", "func": "UDF_REGEX_ISMATCH",
+     "args": lambda: ("err_udf",), "reconstruct": _regex_r4_probe,
+     "py_ref": lambda a: 1.0},
 
 ]
 

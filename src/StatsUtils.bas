@@ -1400,11 +1400,16 @@ Public Function ZScore( _
         Exit Function
     End If
 
-    If Not IsMissing(value) And Not IsEmpty(value) And Not IsError(value) And VarType(value) <> vbBoolean And IsNumeric(value) Then
+    If Not IsMissing(value) And Not IsEmpty(value) Then
+        If IsError(value) Then
+            Err.Raise ERR_INVALID_INPUT, "ZScore", "value 参数不能为错误值。"
+            Exit Function
+        End If
+        If VarType(value) = vbBoolean Or Not IsNumeric(value) Then
+            Err.Raise ERR_INVALID_INPUT, "ZScore", "value 参数必须为数值。"
+            Exit Function
+        End If
         ZScore = (CDbl(value) - m) / s
-    ElseIf Not IsMissing(value) And Not IsEmpty(value) And IsError(value) Then
-        Err.Raise ERR_INVALID_INPUT, "ZScore", "需要至少一个有效数值。"
-        Exit Function
     Else
         ReDim result(lb To UBound(arr))
         For i = lb To UBound(arr)

@@ -12,7 +12,7 @@ ExcelVBA函数库/
 │   ├── VariantKit.cls              # 类型归一化
 │   ├── ArrayOps.cls                # 通用数组操作
 │   └── DictProxy.cls               # 安全字典 + 批量操作
-├── src/                            # VBA .bas 模块（15 个）
+├── src/                            # VBA .bas 模块（16 个）
 │   │  数据层
 │   ├── ArrayUtils.bas            # 数组 — 排序/筛选/切片/聚合/查找
 │   ├── DictSetUtils.bas          # 字典/集合 — 合并/交集/差集/频率
@@ -22,6 +22,7 @@ ExcelVBA函数库/
 │   ├── LinearUtils.bas           # 线性代数 — SVD/QR/LU/Cholesky/PINV
 │   ├── StatsUtils.bas            # 统计 — 描述/推断/分布/关联
 │   ├── RegressUtils.bas          # 回归 — OLS/ANOVA/因子重要性/优化
+│   ├── SolveUtils.bas            # 反解 — 目标反推可调参数/预测/质量/方程
 │   │  文本层
 │   ├── StringUtils.bas           # 字符串 — 编码/校验/距离/UUID/URL
 │   ├── RegexUtils.bas            # 正则 — 匹配/替换/分割/捕获组
@@ -140,12 +141,12 @@ ExcelVBA函数库/
 
 ### src/ — 功能模块层
 
-15 个 `.bas` 模块按领域分 6 组：
+16 个 `.bas` 模块按领域分 6 组：
 
 | 层级 | 模块 | 职责 |
 |------|------|------|
 | 数据层 | ArrayUtils, DictSetUtils, PivotUtils, SqlUtils | 数组运算、集合操作、数据重塑、SQL 查询 |
-| 统计/数学层 | LinearUtils, StatsUtils, RegressUtils | 线性代数、统计分析、回归建模 |
+| 统计/数学层 | LinearUtils, StatsUtils, RegressUtils, SolveUtils | 线性代数、统计分析、回归建模、工艺反解 |
 | 文本层 | StringUtils, RegexUtils, JsonUtils, XmlUtils | 字符串编码、正则处理、JSON/XML 解析 |
 | 日期 | DateTimeUtils | ISO 周、工作日、年龄、时间戳 |
 | Excel/文件层 | RangeUtils, FileSystemUtils | Range 导出、UTF-8 文件读写 |

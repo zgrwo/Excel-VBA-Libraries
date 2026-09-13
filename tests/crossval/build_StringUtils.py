@@ -1459,7 +1459,7 @@ if __name__ == "__main__":
     print(f"\n  UUID / RandomString format checks (manual):")
     import win32com.client
 
-    excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
+    excel = win32com.client.Dispatch("Excel.Application")
     excel.Visible = False
     excel.DisplayAlerts = False
     excel.AutomationSecurity = 1  # msoAutomationSecurityLow

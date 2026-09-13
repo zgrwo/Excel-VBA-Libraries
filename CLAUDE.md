@@ -1,6 +1,6 @@
 # AGENTS.md — Excel-VBA-Libraries 项目宪法
 
-> 高性能 VBA 函数库：15 个模块，纯 VBA 实现，零外部依赖。
+> 高性能 VBA 函数库：16 个模块，纯 VBA 实现，零外部依赖。
 > 本文件面向 AI 编程助手，编码细节按需加载 Skill。
 
 ## 元数据
@@ -64,8 +64,8 @@ VBA-Core (类模块)
   VariantKit → ArrayOps → DictProxy（导入时按此顺序）
       ↑ 依赖
 src/ (标准模块)
-  15 个 .bas 模块，相互独立（均依赖 VBA-Core）
-  例外：RegressUtils 依赖 LinearUtils + StatsUtils
+  16 个 .bas 模块，相互独立（均依赖 VBA-Core）
+  例外：RegressUtils 依赖 LinearUtils + StatsUtils；SolveUtils 依赖 LinearUtils
 ```
 
 ## 仓库目录树
@@ -75,7 +75,7 @@ src/ (标准模块)
 ```
 ExcelVBA函数库/
 ├── VBA-Core/                       # 公共基础设施（VariantKit/ArrayOps/DictProxy）
-├── src/                            # 15 个 .bas 标准模块
+├── src/                            # 16 个 .bas 标准模块
 ├── tests/                          # 4 层测试体系（验证/交叉/集成/单元）
 ├── docs/                           # 用户文档 + 二进制工作簿
 ├── scripts/                        # 开发工具脚本（hooks/结构校验）
@@ -122,7 +122,7 @@ ExcelVBA函数库/
 | 原则 | 核心 |
 | :--- | :--- |
 | **静默传播阻断** | 显式守卫 `NaN`/`Inf`/`Null`/`Empty`，不兜底（数值类 UDF 返回 `CVErr(xlErrNum)` 哨兵，0 是有效值） |
-| **防御完整性** | 安全机制覆盖模块所有方法（路径验证 / 超时 / 参数化；VBA 侧入口统一走 VariantKit.NormalizeInput） |
+| **防御完整性** | 安全机制覆盖模块所有方法（路径验证 / 超时 / 参数化；新代码优先使用 VariantKit.NormalizeInput，存量分批迁移；Public 函数必须显式处理 Range 与 Variant 数组双路径） |
 | **异常过滤器** | 统一排除不可恢复异常；`On Error Resume Next` 必须检查 `Err.Number`（见 context.md 反模式条目） |
 
 ### 7. 闭环验证强制

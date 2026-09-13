@@ -216,21 +216,27 @@ End Function
 ' DaysInMonth / DaysInYear / DayOfYear
 '=============================================================================
 Public Function DaysInMonth(Optional ByVal y As Variant, Optional ByVal m As Variant) As Long
-    If IsMissing(y) Then y = Year(Date)
+    Dim yMissing As Boolean: yMissing = IsMissing(y)
+    If yMissing Then y = Year(Date)
     If IsMissing(m) Then
-        ' 单参数: 如果看起来像日期，同时提取年份和月份。
-        ' IsDate 同时捕获 vbDate 和工作表 Double 序列号。
-        ' 注意: 纯数字（如 2024）在 VBA 中是日期序列号;
-        ' 调用者应传递两个参数 (year, month) 来表示纯数值年份。
+        ' 单参数语义: Date / 日期字符串 / Excel 日期序列号 → 取该日期的年月。
+        ' IsDate 仅对 vbDate 与日期字符串返回 True, 数值序列号需走数值分支。
+        ' 纯数值按序列号解释 (模块契约), 超范围或非数值型则报错。
         If VarType(y) = vbDate Or IsDate(y) Then
             m = Month(CDate(y))
             y = Year(CDate(y))
-        Else
-            m = Month(Date)
-            If Not IsNumeric(y) Then
+        ElseIf yMissing Then
+            m = Month(Date)   ' 无参数: 默认当前月
+        ElseIf Not IsEmpty(y) And IsNumeric(y) Then
+            If CDbl(y) < 1# Or CDbl(y) > 2958465# Then
                 Err.Raise ERR_OUT_OF_BOUNDS, "DateTimeUtils", _
-                    "DaysInMonth: 单参数必须是日期或数值年份，但传入了非数值型值。"
+                    "DaysInMonth: " & CStr(y) & " 不是有效的日期序列号; 纯数值年份请传入 (year, month)。"
             End If
+            m = Month(CDate(CDbl(y)))
+            y = Year(CDate(CDbl(y)))
+        Else
+            Err.Raise ERR_OUT_OF_BOUNDS, "DateTimeUtils", _
+                "DaysInMonth: 单参数必须是日期或日期序列号。"
         End If
     Else
         ' Two arguments: treat as year and month numbers
@@ -640,21 +646,14 @@ Public Function IsHoliday(ByVal d As Date, ByVal holidays As Variant) As Boolean
         ElseIf TypeOf holidays Is Range Then
             holidayData = holidays.Value
             If Not IsArray(holidayData) Then
-                If IsDate(holidayData) Then
-                    If Int(CDate(holidayData)) = d Then
-                        IsHoliday = True
-                        Exit Function
-                    End If
-                End If
+                If HolidayMatch(holidayData, d) Then IsHoliday = True
                 Exit Function
             End If
             For r = LBound(holidayData, 1) To UBound(holidayData, 1)
                 For c = LBound(holidayData, 2) To UBound(holidayData, 2)
-                    If IsDate(holidayData(r, c)) Then
-                        If Int(CDate(holidayData(r, c))) = d Then
-                            IsHoliday = True
-                            Exit Function
-                        End If
+                    If HolidayMatch(holidayData(r, c), d) Then
+                        IsHoliday = True
+                        Exit Function
                     End If
                 Next
             Next
@@ -678,21 +677,17 @@ Public Function IsHoliday(ByVal d As Date, ByVal holidays As Variant) As Boolean
             If is2D Then
                 For r2 = LBound(holidays, 1) To UBound(holidays, 1)
                     For c2 = LBound(holidays, 2) To UBound(holidays, 2)
-                        If IsDate(holidays(r2, c2)) Then
-                            If Int(CDate(holidays(r2, c2))) = d Then
-                                IsHoliday = True
-                                Exit Function
-                            End If
+                        If HolidayMatch(holidays(r2, c2), d) Then
+                            IsHoliday = True
+                            Exit Function
                         End If
                     Next
                 Next
             Else
                 For i = LBound(holidays) To UBound(holidays)
-                    If IsDate(holidays(i)) Then
-                        If Int(CDate(holidays(i))) = d Then
-                            IsHoliday = True
-                            Exit Function
-                        End If
+                    If HolidayMatch(holidays(i), d) Then
+                        IsHoliday = True
+                        Exit Function
                     End If
                 Next
             End If
@@ -702,6 +697,19 @@ Public Function IsHoliday(ByVal d As Date, ByVal holidays As Variant) As Boolean
     Else
         Err.Raise ERR_INVALID_INPUT, "DateTimeUtils", _
             "Unsupported holidays type: " & TypeName(holidays) & ". Expected Range, Dictionary, or Array."
+    End If
+End Function
+
+' HolidayMatch — 判断 v 是否为与 d 相同的日期
+' 接受 Date / 日期字符串 / Excel 数值序列号 (1..2958465)
+Private Function HolidayMatch(ByVal v As Variant, ByVal d As Date) As Boolean
+    If IsEmpty(v) Or IsNull(v) Or IsError(v) Then Exit Function
+    If IsDate(v) Then
+        HolidayMatch = (Int(CDate(v)) = d)
+    ElseIf IsNumeric(v) Then
+        If CDbl(v) >= 1# And CDbl(v) <= 2958465# Then
+            HolidayMatch = (Int(CDate(CDbl(v))) = d)
+        End If
     End If
 End Function
 

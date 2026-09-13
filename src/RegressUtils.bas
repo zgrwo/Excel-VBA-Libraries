@@ -45,6 +45,7 @@ Private Const PI As Double = 3.14159265358979
 Private Const ERR_INVALID_DATA  As Long = vbObjectError + 3001
 Private Const ERR_UNDERDETERM   As Long = vbObjectError + 3002
 Private Const ERR_UNKNOWN_LEVEL As Long = vbObjectError + 3004
+Private Const ERR_INVALID_PARAM As Long = vbObjectError + 3005
 Private Const ERR_TOO_FEW_ROWS  As Long = vbObjectError + 3101
 Private Const REG_IDX_THRESHOLD As Long = 16
 
@@ -124,7 +125,9 @@ End Function
 '=============================================================================
 Private Function GetCategoricalLevels(ByRef dataArr As Variant, ByVal col As Long, _
                                        ByVal startRow As Long, ByVal endRow As Long) As String()
-    Dim dict As Object: Set dict = DP.Create()
+    Dim dict As Object: Set dict = DP.Create(vbBinaryCompare)
+    ' 分类水平必须区分大小写: 训练编码与预测查找均按二进制比较, 避免 TextCompare 合并后
+    ' 大小写变体行全部落入参考水平 (静默错编码)。
     Dim r As Long, v As Variant, key As Variant
     Dim result() As String
     Dim i As Long
@@ -133,7 +136,7 @@ Private Function GetCategoricalLevels(ByRef dataArr As Variant, ByVal col As Lon
 
     For r = startRow To endRow
         v = dataArr(r, col)
-        If Not IsEmpty(v) Then
+        If Not IsEmpty(v) And Not IsNull(v) And Not IsError(v) Then
             key = CStr(v)
             If Not dict.Exists(key) Then dict.Add key, key
         End If
@@ -279,7 +282,13 @@ Private Function BuildDesignMatrix(ByRef dataArr As Variant, _
                         If IsError(dataArr(firstDataRow + r - 1, fCol)) Then
                             isRowValid = False: Exit For
                         End If
-                    ' categorical: 总是有效 (空字符串也是有效类别)
+                    Case "categorical"
+                        ' 空白/错误分类值按无效行处理 (与 GetCategoricalLevels/预测路径一致)
+                        If IsEmpty(dataArr(firstDataRow + r - 1, fCol)) Or _
+                           IsNull(dataArr(firstDataRow + r - 1, fCol)) Or _
+                           IsError(dataArr(firstDataRow + r - 1, fCol)) Then
+                            isRowValid = False: Exit For
+                        End If
                 End Select
             Next
         End If
@@ -565,6 +574,7 @@ Public Function FitOLS(ByRef X As Variant, ByRef y As Variant) As Object
     Dim tStats() As Double, pValues() As Double
     Dim fStat As Double, fPValue As Double
     Dim ssReg As Double
+    Dim zeroPivots As Long
     Dim model As Object
 
     VK.NormalizeInput X
@@ -617,6 +627,7 @@ Public Function FitOLS(ByRef X As Variant, ByRef y As Variant) As Object
         Next
         If R(rr0 + j - 1, rc0 + j - 1) = 0# Or (rTol > 0# And Abs(R(rr0 + j - 1, rc0 + j - 1)) < rTol) Then
             coef(j) = 0#
+            zeroPivots = zeroPivots + 1
         Else
             coef(j) = s / R(rr0 + j - 1, rc0 + j - 1)
         End If
@@ -720,6 +731,8 @@ Public Function FitOLS(ByRef X As Variant, ByRef y As Variant) As Object
     model.Add "se", se
     model.Add "t_stats", tStats
     model.Add "p_values", pValues
+    model.Add "rank", p - zeroPivots
+    model.Add "rank_deficient", (zeroPivots > 0)
     model.Add "f_stat", fStat
     model.Add "f_pvalue", fPValue
     model.Add "n", n
@@ -845,8 +858,12 @@ Private Function EncodePredictRow(ByRef factorValues As Variant, _
                 If colInfo.Exists("levels") Then
                     levels = colInfo("levels")
                     nLev = UBound(levels) - LBound(levels) + 1
-                    vStr = CStr(val)
                     If nLev > 1 Then
+                        If IsNull(val) Or IsEmpty(val) Or IsError(val) Then
+                            Err.Raise ERR_UNKNOWN_LEVEL, "EncodePredictRow", _
+                                "分类因子列 " & fCol & " 存在空白/错误值，无法预测。"
+                        End If
+                        vStr = CStr(val)
                         catMatched = False
                         For cf = 2 To nLev
                             di = LBound(designCols) + cf - 2
@@ -1110,6 +1127,8 @@ Public Function InteractionEffects(ByVal data As Variant, _
     Dim sseBase As Double, sseFull As Double
     Dim dfDiff As Long, dfFull As Long
     Dim fStat As Double, pVal As Double
+    Dim truncArr() As Variant
+    Dim tr As Long, tc As Long
     Dim vk As VariantKit: Set vk = New VariantKit
 
     dataArr = vk.NormalizeTo2D(data, numRows, numCols)
@@ -1237,12 +1256,18 @@ NextFj:
 NextFi:
     Next fi
 
-    ' 截断至实际对数
+    ' 截断至实际对数 — 2D 数组首维不可 ReDim Preserve (Error 9), 复制到新数组
     If pairIdx < numPairs Then
-        ReDim Preserve intResults(1 To pairIdx + 1, 1 To 6)
+        ReDim truncArr(1 To pairIdx + 1, 1 To 6)
+        For tr = 1 To pairIdx + 1
+            For tc = 1 To 6
+                truncArr(tr, tc) = intResults(tr, tc)
+            Next tc
+        Next tr
+        InteractionEffects = truncArr
+    Else
+        InteractionEffects = intResults
     End If
-
-    InteractionEffects = intResults
 End Function
 
 '=============================================================================
@@ -1279,6 +1304,9 @@ Public Function ANOVAOneWay(ByVal data As Variant, _
     Dim ssb As Double, ssw As Double
     Dim groupMean As Double
     Dim sst As Double
+    ' 数值稳定性: 以首个有效响应为平移基准, 在居中空间累加 (大偏置常数响应防假显著)
+    Dim yShift As Double, yShiftSet As Boolean
+    Dim valC As Double, grandMeanC As Double, groupMeanC As Double
     Dim dfB As Long, dfW As Long, dfT As Long
     Dim msb As Double, msw As Double, fStat As Double, pVal As Double
     Dim etaSq As Double
@@ -1328,13 +1356,15 @@ Public Function ANOVAOneWay(ByVal data As Variant, _
         Else
             key = CStr(dataArr(r, factorCol))
             val = CDbl(dataArr(r, resultCol))
+            If Not yShiftSet Then yShift = val: yShiftSet = True
+            valC = val - yShift
             idx = idx + 1
             allValues(idx) = val
-            grandSum = grandSum + val
+            grandSum = grandSum + valC
             Set grp = groups(key)
             grp("count") = grp("count") + 1
-            grp("sum") = grp("sum") + val
-            grp("sumsq") = grp("sumsq") + val * val
+            grp("sum") = grp("sum") + valC
+            grp("sumsq") = grp("sumsq") + valC * valC
         End If
     Next
     n = idx  ' 更新为有效行数 (列表删除)
@@ -1356,30 +1386,32 @@ Public Function ANOVAOneWay(ByVal data As Variant, _
         Set ANOVAOneWay = result: Exit Function
     End If
 
-    grandMean = grandSum / n
+    grandMeanC = grandSum / n
+    grandMean = yShift + grandMeanC
 
-    ' 组间平方和 — 存储组均值用于两阶段组内平方和计算
+    ' 组间平方和 — 在居中空间计算 (平移不变量, 避免大偏置抵消)
     ssb = 0#: ssw = 0#
     For Each key In groups.Keys
         Set grp = groups(key)
         If grp("count") > 0 Then
-            groupMean = grp("sum") / grp("count")
+            groupMeanC = grp("sum") / grp("count")
         Else
-            groupMean = 0#
+            groupMeanC = 0#
         End If
-        ssb = ssb + grp("count") * (groupMean - grandMean) ^ 2
-        grp("mean") = groupMean
+        ssb = ssb + grp("count") * (groupMeanC - grandMeanC) ^ 2
+        grp("meanC") = groupMeanC
+        grp("mean") = yShift + groupMeanC
     Next
 
-    ' 两阶段组内平方和: 避免 sumsq - n*mean² 导致的灾难性抵消
+    ' 两阶段组内平方和: 同样在居中空间计算
     For r = firstDataRow To numRows
         If Not IsNumericCell(dataArr(r, resultCol)) Then
             ' 跳过结果列缺失的行
         Else
             key = CStr(dataArr(r, factorCol))
-            val = CDbl(dataArr(r, resultCol))
+            valC = CDbl(dataArr(r, resultCol)) - yShift
             Set grp = groups(key)
-            ssw = ssw + (val - grp("mean")) * (val - grp("mean"))
+            ssw = ssw + (valC - grp("meanC")) * (valC - grp("meanC"))
         End If
     Next
 
@@ -1442,6 +1474,7 @@ End Function
 ' 返回: Dictionary (模型对象)
 '   "coefficients", "coef_names", "r_squared", "adj_r_squared",
 '   "se", "t_stats", "p_values", "f_stat", "f_pvalue",
+'   "rank", "rank_deficient" (秩亏标志: 部分系数不可辨识, 已置 0),
 '   "fitted_values", "residuals", "n", "p", "df_residual",
 '   "factor_map" (用于预测), "formula" (公式文本)
 '=============================================================================
@@ -1541,13 +1574,23 @@ Public Function LinearModelPredict(ByVal model As Object, ByVal newData As Varia
     If IsObject(newData) Then
         If TypeOf newData Is Range Then
             Set rng = newData
-            If rng.Columns.Count > 1 Then Set rng = rng.Rows(1)
-            For fi = 0 To nf - 1
-                ci = CLng(factorCols(LBound(factorCols) + fi))
-                If fi + 1 <= rng.Cells.Count Then
-                    factorValues(ci) = rng.Cells(1, fi + 1).Value
-                End If
-            Next
+            If rng.Columns.Count = 1 And rng.Rows.Count > 1 Then
+                ' 纵向单列: 逐行读取, 不越界到相邻列 (Cells(1, fi+1) 会读到区域外的单元格)
+                For fi = 0 To nf - 1
+                    ci = CLng(factorCols(LBound(factorCols) + fi))
+                    If fi + 1 <= rng.Rows.Count Then
+                        factorValues(ci) = rng.Cells(fi + 1, 1).Value
+                    End If
+                Next
+            Else
+                If rng.Columns.Count > 1 Then Set rng = rng.Rows(1)
+                For fi = 0 To nf - 1
+                    ci = CLng(factorCols(LBound(factorCols) + fi))
+                    If fi + 1 <= rng.Columns.Count Then
+                        factorValues(ci) = rng.Cells(1, fi + 1).Value
+                    End If
+                Next
+            End If
         End If
     ElseIf IsArray(newData) Then
         For fi = 0 To nf - 1
@@ -1819,6 +1862,13 @@ Public Function OptimizeFactors(ByVal data As Variant, _
         goalMode = "target"
     Else
         goalMode = LCase(CStr(goal))
+        Select Case goalMode
+            Case "max", "min", "target"
+                ' 合法目标
+            Case Else
+                Err.Raise ERR_INVALID_PARAM, "OptimizeFactors", _
+                    "不支持的 goal: '" & CStr(goal) & "' (支持 max/min/target 或数值目标)。"
+        End Select
     End If
 
     ' 当前组合

@@ -1248,7 +1248,7 @@ Public Function URLDecode(ByVal text As String) As String
                 i = i + 1
             End If
         Else
-            If AscW(ch) <= 255 Then
+            If (AscW(ch) And &HFFFF&) <= 255 Then
                 bytes(byteIdx) = CByte(AscW(ch))
                 byteIdx = byteIdx + 1
             End If

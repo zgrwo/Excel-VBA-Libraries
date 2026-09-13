@@ -16,6 +16,7 @@ Private Const ERR_MULTI_AREA As Long = vbObjectError + 1005
 Private Const ERR_MULTI_SELECT As Long = vbObjectError + 1003
 Private Const ERR_STREAM_FAIL As Long = vbObjectError + 1010
 Private Const ERR_FORMULA_RANGE As Long = vbObjectError + 1014
+Private Const ERR_INVALID_OP As Long = vbObjectError + 1015
 '
 ' 注意: 本模块函数不支持多区域选择 (Multi-Area Range)。
 '       除 CountVisible / RangeDiff / FindAll 显式处理多区域外，
@@ -1200,6 +1201,16 @@ Public Function FilterRangeToArray( _
         FilterRangeToArray = Array()
         Exit Function
     End If
+
+    ' 运算符白名单 — 未知运算符必须报错, 不能静默返回空结果
+    Select Case LCase$(Trim$(op))
+        Case "=", "<>", "<", "<=", ">", ">=", "contains", "notcontains", _
+             "startswith", "endswith", "isblank", "isnotblank", "regex"
+            ' 合法运算符
+        Case Else
+            Err.Raise ERR_INVALID_OP, "FilterRangeToArray", _
+                "不支持的运算符: '" & CStr(op) & "'。"
+    End Select
 
     GetRangeData rng, data, nRows, nCols
 

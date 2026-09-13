@@ -358,6 +358,7 @@ Public Function RegexCount( _
 
     ' Array (from Range.Value or direct array input): iterate and sum
     If IsArray(InputText) Then
+        InputText = RegexEnsure2D(InputText)
         Set objReg = GetRegex(Pattern, IgnoreCase, MultiLine)
         total = 0
         For i = LBound(InputText, 1) To UBound(InputText, 1)
@@ -372,6 +373,10 @@ Public Function RegexCount( _
         RegexCount = total
         Set objReg = Nothing
         Exit Function
+    End If
+
+    If IsError(InputText) Then
+        Err.Raise ERR_INVALID_INPUT, "RegexCount", "输入不能为错误值。"
     End If
 
 SingleCell:
@@ -390,6 +395,34 @@ SingleCell:
 
 ErrHandler:
     Err.Raise Err.Number, "RegexCount", "正则计数失败: " & Err.Description
+End Function
+
+' RegexEnsure2D — 将 1D Variant 数组归一化为 N×1 2D 数组 (2D 原样返回)
+Private Function RegexEnsure2D(ByRef v As Variant) As Variant
+    Dim dummy As Long, is2D As Boolean
+    Dim lb As Long, ub As Long, i As Long
+    Dim out() As Variant
+
+    If Not IsArray(v) Then
+        RegexEnsure2D = v
+        Exit Function
+    End If
+    Err.Clear: On Error Resume Next
+    dummy = UBound(v, 2)
+    is2D = (Err.Number = 0)
+    On Error GoTo 0
+    If is2D Then
+        RegexEnsure2D = v
+        Exit Function
+    End If
+    lb = LBound(v): ub = UBound(v)
+    If ub < lb Then
+        RegexEnsure2D = Array()
+        Exit Function
+    End If
+    ReDim out(lb To ub, 1 To 1)
+    For i = lb To ub: out(i, 1) = v(i): Next i
+    RegexEnsure2D = out
 End Function
 
 '=============================================================================
@@ -923,6 +956,7 @@ Public Function UDF_REGEX_ISMATCH( _
     Optional ByVal MultiLine As Variant = True) As Variant
     On Error GoTo EH
     If IsObject(InputText) Then If TypeName(InputText) = "Range" Then InputText = InputText.Value
+    InputText = RegexEnsure2D(InputText)
     If IsArray(InputText) Then
         Dim i As Long, j As Long, v As Variant, resultArr() As Variant
         ReDim resultArr(LBound(InputText,1) To UBound(InputText,1), LBound(InputText,2) To UBound(InputText,2))
@@ -932,6 +966,7 @@ Public Function UDF_REGEX_ISMATCH( _
         Next: Next
         UDF_REGEX_ISMATCH = resultArr: Exit Function
     End If
+    If IsError(InputText) Then UDF_REGEX_ISMATCH = CVErr(xlErrValue): Exit Function
     UDF_REGEX_ISMATCH = RegexIsMatch(CStr(InputText), Pattern, IgnoreCase, MultiLine): Exit Function
 EH: UDF_REGEX_ISMATCH = CVErr(xlErrValue)
 End Function
@@ -945,6 +980,7 @@ Public Function UDF_REGEX_EXTRACT( _
     Optional ByVal Separator As Variant = SEP_DEFAULT) As Variant
     On Error GoTo EH
     If IsObject(InputText) Then If TypeName(InputText) = "Range" Then InputText = InputText.Value
+    InputText = RegexEnsure2D(InputText)
     If IsArray(InputText) Then
         Dim i As Long, j As Long, v As Variant, resultArr() As Variant
         ReDim resultArr(LBound(InputText,1) To UBound(InputText,1), LBound(InputText,2) To UBound(InputText,2))
@@ -954,6 +990,7 @@ Public Function UDF_REGEX_EXTRACT( _
         Next: Next
         UDF_REGEX_EXTRACT = resultArr: Exit Function
     End If
+    If IsError(InputText) Then UDF_REGEX_EXTRACT = CVErr(xlErrValue): Exit Function
     UDF_REGEX_EXTRACT = RegexExtract(CStr(InputText), Pattern, Instance, IgnoreCase, MultiLine, Separator): Exit Function
 EH: UDF_REGEX_EXTRACT = CVErr(xlErrValue)
 End Function
@@ -965,6 +1002,7 @@ Public Function UDF_REGEX_EXTRACTALL( _
     Optional ByVal MultiLine As Variant = True) As Variant
     On Error GoTo EH
     If IsObject(InputText) Then If TypeName(InputText) = "Range" Then InputText = InputText.Value
+    InputText = RegexEnsure2D(InputText)
     If IsArray(InputText) Then
         Dim i As Long, j As Long, v As Variant, resultArr() As Variant
         ReDim resultArr(LBound(InputText,1) To UBound(InputText,1), LBound(InputText,2) To UBound(InputText,2))
@@ -974,6 +1012,7 @@ Public Function UDF_REGEX_EXTRACTALL( _
         Next: Next
         UDF_REGEX_EXTRACTALL = resultArr: Exit Function
     End If
+    If IsError(InputText) Then UDF_REGEX_EXTRACTALL = CVErr(xlErrValue): Exit Function
     UDF_REGEX_EXTRACTALL = RegexExtractAll(CStr(InputText), Pattern, IgnoreCase, MultiLine): Exit Function
 EH: UDF_REGEX_EXTRACTALL = CVErr(xlErrValue)
 End Function
@@ -985,6 +1024,7 @@ Public Function UDF_REGEX_EXTRACTGROUPS( _
     Optional ByVal MultiLine As Variant = True) As Variant
     On Error GoTo EH
     If IsObject(InputText) Then If TypeName(InputText) = "Range" Then InputText = InputText.Value
+    InputText = RegexEnsure2D(InputText)
     If IsArray(InputText) Then
         Dim i As Long, j As Long, v As Variant, resultArr() As Variant
         ReDim resultArr(LBound(InputText,1) To UBound(InputText,1), LBound(InputText,2) To UBound(InputText,2))
@@ -994,6 +1034,7 @@ Public Function UDF_REGEX_EXTRACTGROUPS( _
         Next: Next
         UDF_REGEX_EXTRACTGROUPS = resultArr: Exit Function
     End If
+    If IsError(InputText) Then UDF_REGEX_EXTRACTGROUPS = CVErr(xlErrValue): Exit Function
     UDF_REGEX_EXTRACTGROUPS = RegexExtractGroups(CStr(InputText), Pattern, IgnoreCase, MultiLine): Exit Function
 EH: UDF_REGEX_EXTRACTGROUPS = CVErr(xlErrValue)
 End Function
@@ -1005,6 +1046,7 @@ Public Function UDF_REGEX_FULLMATCH( _
     Optional ByVal MultiLine As Variant = True) As Variant
     On Error GoTo EH
     If IsObject(InputText) Then If TypeName(InputText) = "Range" Then InputText = InputText.Value
+    InputText = RegexEnsure2D(InputText)
     If IsArray(InputText) Then
         Dim i As Long, j As Long, v As Variant, resultArr() As Variant
         ReDim resultArr(LBound(InputText,1) To UBound(InputText,1), LBound(InputText,2) To UBound(InputText,2))
@@ -1014,6 +1056,7 @@ Public Function UDF_REGEX_FULLMATCH( _
         Next: Next
         UDF_REGEX_FULLMATCH = resultArr: Exit Function
     End If
+    If IsError(InputText) Then UDF_REGEX_FULLMATCH = CVErr(xlErrValue): Exit Function
     UDF_REGEX_FULLMATCH = RegexIsFullMatch(CStr(InputText), Pattern, IgnoreCase, MultiLine): Exit Function
 EH: UDF_REGEX_FULLMATCH = CVErr(xlErrValue)
 End Function
@@ -1028,6 +1071,7 @@ Public Function UDF_REGEX_REPLACE( _
     Optional ByVal GlobalReplace As Variant = True) As Variant
     On Error GoTo EH
     If IsObject(InputText) Then If TypeName(InputText) = "Range" Then InputText = InputText.Value
+    InputText = RegexEnsure2D(InputText)
     If IsArray(InputText) Then
         Dim i As Long, j As Long, v As Variant, resultArr() As Variant
         ReDim resultArr(LBound(InputText,1) To UBound(InputText,1), LBound(InputText,2) To UBound(InputText,2))
@@ -1037,6 +1081,7 @@ Public Function UDF_REGEX_REPLACE( _
         Next: Next
         UDF_REGEX_REPLACE = resultArr: Exit Function
     End If
+    If IsError(InputText) Then UDF_REGEX_REPLACE = CVErr(xlErrValue): Exit Function
     UDF_REGEX_REPLACE = RegexReplace(CStr(InputText), Pattern, Replacement, Instance, IgnoreCase, MultiLine, GlobalReplace): Exit Function
 EH: UDF_REGEX_REPLACE = CVErr(xlErrValue)
 End Function
@@ -1048,6 +1093,7 @@ Public Function UDF_REGEX_SPLIT( _
     Optional ByVal MultiLine As Variant = True) As Variant
     On Error GoTo EH
     If IsObject(InputText) Then If TypeName(InputText) = "Range" Then InputText = InputText.Value
+    InputText = RegexEnsure2D(InputText)
     If IsArray(InputText) Then
         Dim i As Long, j As Long, v As Variant, resultArr() As Variant
         ReDim resultArr(LBound(InputText,1) To UBound(InputText,1), LBound(InputText,2) To UBound(InputText,2))
@@ -1057,6 +1103,7 @@ Public Function UDF_REGEX_SPLIT( _
         Next: Next
         UDF_REGEX_SPLIT = resultArr: Exit Function
     End If
+    If IsError(InputText) Then UDF_REGEX_SPLIT = CVErr(xlErrValue): Exit Function
     UDF_REGEX_SPLIT = RegexSplit(CStr(InputText), Pattern, IgnoreCase, MultiLine): Exit Function
 EH: UDF_REGEX_SPLIT = CVErr(xlErrValue)
 End Function
@@ -1066,7 +1113,11 @@ Public Function UDF_REGEX_COUNT( _
     ByVal Pattern As Variant, _
     Optional ByVal IgnoreCase As Variant = True, _
     Optional ByVal MultiLine As Variant = True) As Variant
-    On Error GoTo EH: UDF_REGEX_COUNT = RegexCount(InputText, Pattern, IgnoreCase, MultiLine): Exit Function
+    On Error GoTo EH
+    If IsObject(InputText) Then If TypeName(InputText) = "Range" Then InputText = InputText.Value
+    InputText = RegexEnsure2D(InputText)
+    If IsError(InputText) Then UDF_REGEX_COUNT = CVErr(xlErrValue): Exit Function
+    UDF_REGEX_COUNT = RegexCount(InputText, Pattern, IgnoreCase, MultiLine): Exit Function
 EH: UDF_REGEX_COUNT = CVErr(xlErrValue)
 End Function
 

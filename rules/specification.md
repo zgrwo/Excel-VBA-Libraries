@@ -4,7 +4,7 @@
 
 ## 1. 项目概述
 
-**Excel-VBA-Libraries** 是一个纯 VBA 实现的 Excel 函数增强库，提供 15 个功能模块、500+ 个 Public 函数（精确计数唯一权威：rules/api-reference.md 计数头），覆盖统计、线性代数、回归、物理化学、字符串、日期时间、正则、数组、字典、JSON、XML、透视表、SQL、Range 操作、文件系统等。
+**Excel-VBA-Libraries** 是一个纯 VBA 实现的 Excel 函数增强库，提供 16 个功能模块、500+ 个 Public 函数（精确计数唯一权威：rules/api-reference.md 计数头），覆盖统计、线性代数、回归、工艺参数反解、物理化学、字符串、日期时间、正则、数组、字典、JSON、XML、透视表、SQL、Range 操作、文件系统等。
 
 ### 核心价值
 
@@ -28,6 +28,7 @@
 | StatsUtils | StatsUtils.bas | 均值/方差/分位数/相关/ANOVA/排名 |
 | LinearUtils | LinearUtils.bas | 行列式/求逆/特征值/矩阵运算 |
 | RegressUtils | RegressUtils.bas | OLS/WLS/岭回归/R² |
+| SolveUtils | SolveUtils.bas | 工艺参数反解/前向预测/交叉验证质量/方程文本 |
 | PhyChemUtils | PhyChemUtils.bas | 分子量/温度/压力/气体定律/单位换算 |
 | StringUtils | StringUtils.bas | 反转/提取/编解码/编辑距离/Soundex |
 | DateTimeUtils | DateTimeUtils.bas | ISO周/工作日/年龄/时间戳 |
@@ -68,6 +69,7 @@ VBA-Core (VariantKit → ArrayOps → DictProxy)
     ├── StatsUtils ← LinearUtils, RegressUtils 依赖
     ├── LinearUtils
     ├── RegressUtils ← 依赖 LinearUtils, StatsUtils
+    ├── SolveUtils ← 依赖 LinearUtils
     ├── PhyChemUtils
     ├── StringUtils
     ├── DateTimeUtils
@@ -86,8 +88,8 @@ VBA-Core (VariantKit → ArrayOps → DictProxy)
 | 层级 | 工具 | 覆盖 |
 |------|------|------|
 | 一致性验证 | Python 脚本（无需 Excel） | 签名/交叉引用/元数据/代码质量 |
-| 交叉验证 | Python COM 自动化 | 18 模块，numpy/scipy 独立计算 |
-| 集成测试 | Python COM + 真实数据 | 15 模块，Range 路径 |
+| 交叉验证 | Python COM 自动化 | 19 模块，numpy/scipy 独立计算 |
+| 集成测试 | Python COM + 真实数据 | 16 模块，Range 路径 |
 | 单元测试 | VBA Test_* | 仅 SqlUtils（ADODB 无法 COM 测试） |
 
 ## 4. 质量规格

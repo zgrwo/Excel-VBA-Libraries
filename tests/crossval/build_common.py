@@ -81,6 +81,11 @@ LAST_SUMMARY: Dict[str, int] = {}
 #   skip_reason str    — reason for skipping (printed in report)
 #   expect_error bool  — if True, the VBA call MUST raise; PASS when it does
 #   expect_err_contains str — optional substring required in the error message
+#     WARNING: errors crossing the COM boundary pop an Excel runtime-error dialog
+#     and can stall/abort the run. Prefer an injected VBA probe that catches the
+#     error inside VBA and returns a status value (see build_RegexUtils.py /
+#     build_SolveUtils.py `*_err_probe`); use expect_error only for exceptional
+#     cases and never in long suites.
 #   is_udf     bool    — if True, first arg is Range data (written to sheet)
 #   kwargs     dict    — keyword args for VBA function (passed after positional)
 # =============================================================================

@@ -39,6 +39,10 @@
   - [Recipe 7.1 — Factor Importance Analysis](#recipe-factor-importance)
   - [Recipe 7.2 — One-Way ANOVA](#recipe-one-way-anova)
   - [Recipe 7.3 — Factor Optimization](#recipe-factor-optimization)
+- **Chapter 16: SolveUtils — Process Parameter Inversion**
+  - [Recipe 16.1 — Three-Step Inversion](#recipe-solve-inverse)
+  - [Recipe 16.2 — Model Quality Check](#recipe-solve-quality)
+  - [Recipe 16.3 — Prediction & Equations](#recipe-solve-predict-equation)
 
 ### Part 3: Text & Data Formats
 
@@ -996,6 +1000,8 @@ result = SetUnion(Array(1, 2, 3), Array(3, 4, 5))
 ' result → {1, 2, 3, 4, 5}
 ```
 
+> Set-operation inputs: a single cell / scalar is treated as a single-element set; `Empty`/`Null` are treated as the empty set.
+
 **UDF Usage**
 ```
 =UDF_DICT_UNION(arr1, arr2)
@@ -1573,7 +1579,7 @@ Unpivot rng, valueCols, nameCol, valCol, destCell, [idColIndices]
 
 #### GroupBy
 
-Group aggregation. Supports SUM/COUNT/AVG/MIN/MAX. Skips Null/Error/non-numeric values.
+Group aggregation. Supports SUM/COUNT/AVG/MIN/MAX. Skips Null/Error/blank and non-numeric aggregated values (except COUNT).
 
 **VBA Usage**
 ```vb
@@ -2954,7 +2960,7 @@ PercentRank(data, value, [ascending], [colIndex]) As Variant
 <a id="binning"></a>
 #### ZScore / Normalize / LinInterp / Winsorize / MovingAverage / Binning
 
-Data transformation tools. ZScore returns single Z score if a single value is given, otherwise returns full array; Normalize is Min-Max normalization; LinInterp performs linear interpolation on sorted xs, ys; Winsorize compresses extreme values; MovingAverage is simple moving average; Binning is equal-width binning (VBA-only, returns Dictionary).
+Data transformation tools. ZScore returns single Z score if a single value is given, otherwise returns full array (when provided, `value` must be numeric; Boolean/text/error values raise an error); Normalize is Min-Max normalization; LinInterp performs linear interpolation on sorted xs, ys; Winsorize compresses extreme values; MovingAverage is simple moving average; Binning is equal-width binning (VBA-only, returns Dictionary).
 
 **VBA Usage**
 ```vb
@@ -3349,7 +3355,7 @@ interact = InteractionEffects(dataRange, Array(1,2,3,4), 5)
 
 #### OptimizeFactors
 
-Grid search for optimal factor combinations. Generates nSteps discrete points within observed range for numeric factors, enumerates {0,1} for Boolean factors, and all levels for categorical factors. Search space upper bound MAX_GRID_COMBOS=200k. goal="max" maximizes, "min" minimizes, or pass a numeric value for target approximation.
+Grid search for optimal factor combinations. Generates nSteps discrete points within observed range for numeric factors, enumerates {0,1} for Boolean factors, and all levels for categorical factors. Search space upper bound MAX_GRID_COMBOS=200k. goal="max" maximizes, "min" minimizes, or pass a numeric value for target approximation; other string values raise an error.
 
 **VBA Usage**
 ```vb
@@ -4634,6 +4640,10 @@ n = Quarter(#2024-07-15#)               ' → 3
 n = FiscalYear(#2025-12-15#, 7)         ' → 2026 (July start)
 ```
 
+> Single-argument `DaysInMonth(x)`: `x` may be a date, date string, or Excel serial number (plain numbers
+> are treated as serials, e.g. 2024 → 1905-07-15). With no argument it returns the current month's day count;
+> invalid/out-of-range serials raise an error.
+
 **UDF Usage**
 ```
 =UDF_DT_DAYSINMONTH(year, month)   =UDF_DT_DAYSINYEAR(year)
@@ -4768,6 +4778,7 @@ d = NextWorkday(#2025-06-11#, 3)                  ' → 2025-06-16 (skips weeken
 #### IsWeekend / IsHoliday
 
 IsWeekend checks if the date is Saturday or Sunday; IsHoliday checks if it is in the specified holidays list.
+`holidays` accepts a Range, array, or Dictionary; dates, date strings, and numeric serial numbers are recognized.
 
 ```vb
 IsWeekend(dt) As Boolean
@@ -5075,7 +5086,7 @@ NamedRangeExists("MyData")  ' → True
 
 #### FilterRangeToArray
 
-Filter a range by a column, returning a 2D array of rows that meet the condition. Supports `=`, `<`, `>`, `<=`, `>=`, `<>`, `contains`, `regex`.
+Filter a range by a column, returning a 2D array of rows that meet the condition. Supports `=`, `<>`, `<`, `<=`, `>`, `>=`, `contains`, `notcontains`, `startswith`, `endswith`, `isblank`, `isnotblank`, `regex`; unknown operators raise an error.
 
 **VBA Usage**
 ```vb
@@ -5788,4 +5799,201 @@ V_std = CylinderStdVolumeFromMass(25, "CO2")            ' 25kg CO2 Cylinder stan
 ```
 
 ---
+
+## Chapter 16: SolveUtils — Process Parameter Inversion (SOLVE.*)
+
+Process-parameter inversion: given history data and output targets, solve for adjustable parameter values, and get forward predictions, model quality and equation text. **Module**: `SolveUtils.bas`
+
+**Quick Reference**
+
+| Function | Signature | Description | Returns |
+|----------|-----------|-------------|---------|
+| [`UDF_SOLVE_INVERSE`](#udf_solve_inverse) | `(data, [request], [bounds], [model], [seed], [max_starts])` | Invert targets to adjustable parameters (recommendation table) | Variant(,) |
+| [`UDF_SOLVE_PREDICT`](#udf_solve_predict) | `(data, values, [model])` | Forward prediction (N×M numeric matrix) | Variant(,) |
+| [`UDF_SOLVE_QUALITY`](#udf_solve_quality) | `(data, [model], [seed])` | Cross-validated quality table | Variant(,) |
+| [`UDF_SOLVE_EQUATION`](#udf_solve_equation) | `(data, [model])` | Forward equation + closed-form inverse formula | Variant(,) |
+
+| Recipe | Functions Used |
+|--------|---------------|
+| [Three-Step Inversion](#recipe-solve-inverse) | `UDF_SOLVE_INVERSE` |
+| [Model Quality Check](#recipe-solve-quality) | `UDF_SOLVE_QUALITY` |
+| [Prediction & Equations](#recipe-solve-predict-equation) | `UDF_SOLVE_PREDICT`, `UDF_SOLVE_EQUATION` |
+
+### Data Convention (Header Prefixes)
+
+Column roles are identified by **header prefix** (case-insensitive; CN prefixes supported too):
+
+| Prefix | Role | Example |
+|--------|------|---------|
+| `Incoming*` | Incoming condition (must be numeric in request rows) | `IncomingA` |
+| `Variable*` | Adjustable parameter (blank in a request row = unknown to solve) | `VariableU1` |
+| `Fixed*` | Fixed condition (blank history cells imputed by column median) | `FixedCatalyst` |
+| `Output*` | Output target | `OutputY1` |
+
+> Chinese header prefixes with the same meanings are also accepted; the matching characters are documented in the CN manual.
+
+- **Row classification**: all adjustable cells numeric → history row; any blank adjustable cell → **request row** (non-blank output cells become targets).
+- **Separate request table**: pass it via `request`; `data` must then be pure history with matching headers.
+- **Models**: `auto` (default; picks by cross-validated R²), `linear`, `poly` (squares + pairwise interactions; ridge λ=1e-5 for numerical stability).
+- **Bounds**: default history min/max; supports 2 columns (variable order) or 3 columns (`name/index, lower, upper`).
+
+> **Localization note**: table headers, row labels, status and equation-type cells returned by the SOLVE UDFs are localized in Chinese in the workbook (e.g. request/data row labels, reachable/unreachable status, forward/inverse equation type). The tables below use English equivalents for readability.
+
+**Limits** (exceeding returns `#VALUE!`): history 2000 rows, requests 100, features 30, adjustable 10, outputs 10, `max_starts` 1–20 (default 10).
+
+<a id="recipe-solve-inverse"></a>
+<a id="udf_solve_inverse"></a>
+### Recipe 16.1 — Three-Step Inversion
+
+**Scenario**: history shows `OutputY1 = 2 + 0.5·IncomingA + 1.5·VariableU1`. With incoming A=10 and a target output of 13, find the adjustable U1.
+
+**Step 1**: put history and a request row on the sheet (`VariableU1` blank = unknown; target 13 in the output column):
+
+|   | A | B | C |
+|---|---|---|---|
+| 1 | IncomingA | VariableU1 | OutputY1 |
+| 2 | 1 | 5 | 10 |
+| 3 | 2 | 8 | 15 |
+| 4 | 3 | 11 | 20 |
+| 5 | 4 | 4 | 10 |
+| 6 | 5 | 7 | 15 |
+| 7 | 6 | 10 | 20 |
+| 8 | 7 | 3 | 10 |
+| 9 | 8 | 6 | 15 |
+| 10 | 9 | 9 | 20 |
+| 11 | 10 | 2 | 10 |
+| 12 | 10 | *(blank)* | 13 |
+
+**Step 2**: enter the formula
+
+```
+=UDF_SOLVE_INVERSE(A1:C12)
+```
+
+**Step 3**: read the recommendation table
+
+| Request row | VariableU1 | OutputY1 (predicted) | Max deviation σ | Status |
+|-------------|-----------|----------------------|-----------------|--------|
+| Data row 12 | 4.0 | 13.0 | ≈0 | Reachable |
+
+Closed-form check: `2 + 0.5×10 + 1.5×4 = 13`. `Max deviation σ = maxⱼ |ŷⱼ−y*ⱼ|/sⱼ` (`sⱼ` = history sample sd of output j, 0 → 1); reachability uses sampling inside bounds with relative tolerance `1e-9 × max(|min|,|max|,|max−min|)`.
+
+**Advanced usage**
+
+```
+' Separate request table (data must be pure history)
+=UDF_SOLVE_INVERSE(A1:C11, E1:G3)
+
+' Bounds table (variable name, lower, upper)
+=UDF_SOLVE_INVERSE(A1:C12, , J1:L2)
+
+' Explicit model, seed and start count
+=UDF_SOLVE_INVERSE(A1:C12, , , "linear", 42, 20)
+```
+
+**VBA Usage**
+```vb
+SolveInverse(data, request, bounds, model, seed, maxStarts) As Variant
+```
+```vb
+tbl = SolveInverse(ws.Range("A1:C12").Value, Empty, Empty, "auto", 42, 10)
+rec = tbl(2, 2)        ' → 4.0
+pred = tbl(2, 3)       ' → 13.0
+status = tbl(2, 5)     ' → reachable (localized label)
+```
+
+**UDF Usage**
+```
+=UDF_SOLVE_INVERSE(data, [request], [bounds], [model], [seed], [max_starts])
+```
+
+<a id="recipe-solve-quality"></a>
+<a id="udf_solve_quality"></a>
+### Recipe 16.2 — Model Quality Check
+
+**Scenario**: confirm which candidate model is more reliable before inverting. On the pure history table (A1:C11):
+
+```
+=UDF_SOLVE_QUALITY(A1:C11, "auto", 42)
+```
+
+Returns `[Output, Candidate, CV scheme, CV_R2, CV_MAE, Selected]`:
+
+| Output | Candidate | CV scheme | CV_R2 | CV_MAE | Selected |
+|--------|-----------|-----------|-------|--------|----------|
+| OutputY1 | linear | LOO | 1.000000 | ≈0 | Yes |
+| OutputY1 | poly | LOO | 1.000000 | ≈0 | No |
+
+- **5-fold** when `n ≥ 20`, **LOO** when `5 ≤ n < 20`; `n < 5` returns `#VALUE!`.
+- `auto` picks the best CV R² (ties below 1e-9 keep `linear`); rows show a "skipped" marker when a candidate is structurally unavailable (poly expansion > 100 terms or too few training rows).
+- Explicit model returns a single row: `=UDF_SOLVE_QUALITY(A1:C11, "linear")`.
+
+**VBA Usage**
+```vb
+SolveQuality(data, model, seed) As Variant
+```
+
+**UDF Usage**
+```
+=UDF_SOLVE_QUALITY(data, [model], [seed])
+```
+
+<a id="recipe-solve-predict-equation"></a>
+<a id="udf_solve_predict"></a>
+<a id="udf_solve_equation"></a>
+### Recipe 16.3 — Prediction & Equations
+
+**Scenario**: verify a recommended setting by forward prediction, and archive process knowledge as equation text.
+
+**Forward prediction** — write complete parameter rows (Incoming + Variable + Fixed, in data feature order) to an empty area (E14:F15):
+
+|   | E | F |
+|---|---|---|
+| 14 | 10 | 4 |
+| 15 | 1 | 5 |
+
+```
+=UDF_SOLVE_PREDICT(A1:C11, E14:F15, "linear")
+```
+
+Returns a 2×1 matrix: `13` (A=10,U=4) and `10` (A=1,U=5).
+
+**Equation text**:
+
+```
+=UDF_SOLVE_EQUATION(A1:C11, "linear")
+```
+
+| Output | Type | Expression |
+|--------|------|------------|
+| OutputY1 | Forward equation | `OutputY1 = 2 + 0.5*IncomingA + 1.5*VariableU1` |
+| OutputY1 | Inverse formula | `VariableU1 = (OutputY1 - 2 - 0.5*IncomingA) / 1.5` |
+
+- Coefficients use `G6` significant digits, region-independent (`.` decimal separator).
+- The **inverse formula is emitted only for a single-variable linear model** with a non-zero linear coefficient; otherwise only the forward equation appears.
+- When the design is **rank-deficient (collinear features)** an extra note row is appended to the output: some coefficients are not identifiable (set to 0); consider ridge regression or removing redundant features.
+- Under `auto`, equations/predictions refit with seed 42 (consistent with the `UDF_SOLVE_QUALITY` CV choice).
+
+**VBA Usage**
+```vb
+SolvePredict(data, values, model) As Variant
+SolveEquation(data, model) As Variant
+```
+
+**UDF Usage**
+```
+=UDF_SOLVE_PREDICT(data, values, [model])
+=UDF_SOLVE_EQUATION(data, [model])
+```
+
+### Notes & Limitations
+
+- **v1 scope**: `model` supports `auto` / `linear` / `poly`; `rate` / `rate_poly` (time-column rate laws) and `SharedOutput*` pooling are v2.
+- **Dual path**: all four UDFs and their core functions accept both Range and Variant arrays; UDFs return `#VALUE!` on failure, cores raise `vbObjectError+16xx`.
+- **Determinism**: default `seed` = 42; same seed and input reproduce recommendations, fold order and sampling bit-for-bit (XorShift64*).
+- **Multiple outputs**: each `Output*` column is fitted and judged independently; `UDF_SOLVE_QUALITY` emits one row per candidate, `UDF_SOLVE_EQUATION` two rows per output.
+- **Performance**: prefer n ≤ 1000, adjustable ≤ 3, requests ≤ 5 (VBA has no async execution; split large tables).
+
+---
+
 

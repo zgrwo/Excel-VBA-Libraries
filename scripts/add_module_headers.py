@@ -33,6 +33,7 @@ MODULE_INFO = {
     "RangeUtils": ("Range export: HTML/JSON/MD/CSV, area operations, naming", "Excel"),
     "FileSystemUtils": ("File system: UTF-8 read/write, folder ops, drive info", "Excel"),
     "PhyChemUtils": ("Physical chemistry: molecular weight, unit conversion, gas laws", "Science"),
+    "SolveUtils": ("Process-parameter inversion: linear/poly models, bounded multi-start solve", "Statistics"),
 }
 
 RE_PUBLIC = re.compile(r"^\s*Public\s+(?:Static\s+)?(?:Function|Sub)\s+(\w+)", re.IGNORECASE)
@@ -53,6 +54,9 @@ def main():
         if name == "RegressUtils":
             deps = "VBA-Core + LinearUtils + StatsUtils (import these first)"
             notes = "Requires LinearUtils and StatsUtils loaded before this module."
+        elif name == "SolveUtils":
+            deps = "VBA-Core + LinearUtils (import these first)"
+            notes = "SOLVE.* v1 (auto/linear/poly). Requires LinearUtils loaded before this module."
         elif name == "SqlUtils":
             notes = "Requires ADODB. 64-bit Office needs Access Database Engine 2016."
         elif name == "XmlUtils":

@@ -67,6 +67,33 @@ def crossval_funcs(mod):
                     fs.add(fm.group(1))
     return fs
 
+
+def crossval_paths(mod):
+    """Count ACTIVE crossval cases by input path (array vs Range/UDF/reconstruct).
+
+    Array path = Python list → COM Variant (no range_path/is_udf/reconstruct).
+    The dual-path principle (AGENTS.md) requires both to be present.
+    """
+    array_cases = range_cases = 0
+    for f in os.listdir(CV):
+        low = f.lower()
+        mlow = mod.lower()
+        if low.startswith("build_") and mlow in low:
+            path = os.path.join(CV, f)
+            with open(path, encoding="utf-8") as fh:
+                content = fh.read()
+            chunks = re.split(r'\{\s*"name"\s*:', content)[1:]
+            for chunk in chunks:
+                if re.search(r'"skip_if"\s*:\s*True', chunk):
+                    continue
+                if not re.search(r'"func"\s*:\s*"(\w+)"', chunk):
+                    continue
+                if re.search(r'"is_udf"\s*:\s*True|"range_path"\s*:\s*True|"reconstruct"', chunk):
+                    range_cases += 1
+                else:
+                    array_cases += 1
+    return array_cases, range_cases
+
 def analyze(mod):
     path = os.path.join(SRC, f"{mod}.bas")
     with open(path, encoding="utf-8-sig") as f:
@@ -107,7 +134,13 @@ if __name__ == "__main__":
             # Module has no VBA Test_* — check if active crossval covers it
             cv = crossval_funcs(mod)
             if cv:
-                print(f"  {mod:20s}  migrated   (0 VBA Test lines, {len(cv)} active crossval funcs)")
+                ac, rc = crossval_paths(mod)
+                tag = f"array={ac} range={rc}"
+                if ac == 0:
+                    print(f"  {mod:20s}  partial    (0 VBA Test lines, {len(cv)} active crossval funcs; {tag})"
+                          f"  <- 数组路径缺失")
+                else:
+                    print(f"  {mod:20s}  migrated   (0 VBA Test lines, {len(cv)} active crossval funcs; {tag})")
             else:
                 print(f"  {mod:20s}  NO TESTS   (no VBA Test_* and no active crossval coverage)")
                 no_coverage.add(mod)

@@ -5,7 +5,7 @@
 > Function signature quick reference. For full usage and examples see [User Manual (CN)](user-manual.md) / [User Manual (EN)](../docs/VBA_LIB_User_Manual_EN.md).
 
 <!-- AUTO_COUNTS_START -->
-**15 模块 | 533 Public Functions | 33 Public Subs | 共 566 个 Public 接口**
+**16 模块 | 541 Public Functions | 33 Public Subs | 共 574 个 Public 接口**
 <!-- AUTO_COUNTS_END -->
 
 ---
@@ -245,6 +245,21 @@
 | CorrelationMatrix↗ | `(data, [hasHeader])` | Variant() | UDF_REGRESS_CORREL |
 
 > Note: `ANOVAOneWay_Fstat` returns the F-statistic directly. `UDF_REGRESS_CORREL` delegates to `CorrelationMatrix` in StatsUtils.bas.
+
+---
+
+## SolveUtils -- Process Parameter Inversion
+
+**Module**: `SolveUtils.bas` | **Public functions**: 4 | **UDFs**: 4
+
+| Function | Signature | Returns | UDF |
+|----------|-----------|---------|-----|
+| SolveInverse | `(data, request, bounds, model, seed, maxStarts)` | Variant | UDF_SOLVE_INVERSE |
+| SolvePredict | `(data, values, model)` | Variant | UDF_SOLVE_PREDICT |
+| SolveQuality | `(data, model, seed)` | Variant | UDF_SOLVE_QUALITY |
+| SolveEquation | `(data, model)` | Variant | UDF_SOLVE_EQUATION |
+
+> **Dependencies**: `LinearUtils.bas` (QRDecomposition / MatrixTranspose / MatrixMultiply) + VBA-Core. v1 models: `auto` / `linear` / `poly`; `rate` / `rate_poly` and SharedOutput pooling are v2. Role headers: `Incoming*`/`来料*`, `Variable*`/`可调*`/`变量*`, `Fixed*`/`固定*`, `Output*`/`输出*`. Defaults: model=auto, seed=42, max_starts=10.
 
 ---
 

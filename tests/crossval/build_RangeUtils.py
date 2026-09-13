@@ -17,6 +17,20 @@ MODULE_PATHS = [os.path.join(VBA_CORE_DIR, name + ".cls")
 MODULE_PATHS.append(os.path.join(SRC_DIR, "RangeUtils.bas"))
 
 
+def _filter_unknown_op_probe(excel, wb, ws, runner, tc, args):
+    """R4-18 回归: 未知运算符必须报错 (此前静默返回标题行)。"""
+    from tests.test_utils import run_macro, write_range
+    data = [["K", "V"], ["a", 1], ["b", 2]]
+    ws.UsedRange.ClearContents()
+    write_range(ws, data, 1, 1)
+    rng = ws.Range(ws.Cells(1, 1), ws.Cells(3, 2))
+    try:
+        run_macro(excel, wb, "RangeUtils.FilterRangeToArray", rng, 1, "~~", "a", True)
+        return 0.0, 1.0, 0.0
+    except Exception:
+        return 1.0, 1.0, 0.0
+
+
 # =============================================================================
 # Test Cases
 # =============================================================================
@@ -180,6 +194,11 @@ TEST_CASES = [
     #   FindAll, IntersectRanges, MergeRanges, UsedRangeEx
     # These are tested manually in Excel where Range objects work natively.
     # =====================================================================
+
+    # 2026-09-13 R4-18 回归: 未知运算符必须报错, 不得静默返回标题行
+    {"name": "FilterRange_unknown_op_raises", "func": "FilterRange_unknown_op_raises",
+     "args": lambda: (), "reconstruct": _filter_unknown_op_probe,
+     "py_ref": lambda a: 1.0},
 ]
 
 

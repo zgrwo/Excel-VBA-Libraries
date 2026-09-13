@@ -912,7 +912,7 @@ Public Function GroupBy( _
         If Len(groupKey) = 0 Then GoTo ContinueRow
 
         If funcUpper <> "COUNT" Then
-            If IsError(data(i, aggCol)) Then GoTo ContinueRow
+            If IsError(data(i, aggCol)) Or IsNull(data(i, aggCol)) Or IsEmpty(data(i, aggCol)) Then GoTo ContinueRow
             If VarType(data(i, aggCol)) = vbBoolean Or Not IsNumeric(data(i, aggCol)) Then GoTo ContinueRow
             val = CDbl(data(i, aggCol))
             isNum = True

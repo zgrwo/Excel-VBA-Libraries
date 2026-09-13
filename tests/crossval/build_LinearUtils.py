@@ -37,6 +37,30 @@ def _call_udf_matrix(excel, wb, ws, runner, func_name, matrix):
     return com_to_numpy(runner._call_udf(excel, wb, ws, tc, (matrix.tolist(),)))
 
 
+def _qr_wide_economy_probe(excel, wb, ws, runner, tc, args):
+    """R4-10 回归: economy=True 宽矩阵 reduced QR 必须可重构 Q·R = A (R 为 m×n)。"""
+    A = np.array(args[0], dtype=float)
+    q = com_to_numpy(runner._call_udf(excel, wb, ws, {"func": "UDF_LINALG_QR_Q"},
+                                      (A.tolist(), True)))
+    r = com_to_numpy(runner._call_udf(excel, wb, ws, {"func": "UDF_LINALG_QR_R"},
+                                      (A.tolist(), True)))
+    recon = q @ r
+    return float(np.max(np.abs(recon - A))), 0.0, 1e-10
+
+
+def _eigen_symmetrize_probe(excel, wb, ws, runner, tc, args):
+    """R4-13 回归: 容差内不对称输入取对称部分 (A+Aᵀ)/2。
+
+    A = diag/block [[1e16,0,0],[0,0,-1],[0,1,0]] 的对称部分块为零矩阵,
+    显式对称化后最小 |特征值| = 0 (旧实现按上三角取数会得到 1)。
+    """
+    A = np.array(args[0], dtype=float)
+    D = com_to_numpy(runner._call_udf(excel, wb, ws, {"func": "UDF_LINALG_EIGVAL"},
+                                      (A.tolist(),)))
+    d = np.diag(D) if D.ndim == 2 else D
+    return float(np.min(np.abs(d))), 0.0, 1e-9
+
+
 def _reconstruct_decomp(excel, wb, ws, runner, func_a, func_b, func_c, A, mode):
     """Reconstruct A from VBA decomposition components.
 
@@ -460,6 +484,14 @@ TEST_CASES = [
     {"name": "MatrixConditionNumber_well", "func": "MatrixConditionNumber",
      "args": lambda: (np.eye(3).tolist(),),
      "py_ref": lambda a: 1.0, "result_type": "scalar", "tol": 1e-6},
+
+    # ---- 2026-09-13 R4-10/R4-13 回归 ----
+    {"name": "QR_Economy_Wide_Reconstruct", "func": "QR_Economy_Wide_Reconstruct",
+     "args": lambda: ([[1., 2., 3.], [4., 5., 6.]],),
+     "reconstruct": _qr_wide_economy_probe, "py_ref": lambda a: 0.0},
+    {"name": "Eigen_Symmetrize_MixedScale", "func": "Eigen_Symmetrize_MixedScale",
+     "args": lambda: ([[1e16, 0., 0.], [0., 0., -1.], [0., 1., 0.]],),
+     "reconstruct": _eigen_symmetrize_probe, "py_ref": lambda a: 0.0},
 
 ]
 
