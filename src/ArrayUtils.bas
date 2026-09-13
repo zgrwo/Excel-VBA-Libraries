@@ -271,57 +271,6 @@ Private Function WrapScalar(ByRef v As Variant) As Variant
 End Function
 
 '=============================================================================
-' CompareValues — 比较两个 Variant（返回 -1 / 0 / 1）
-'
-' 排序规则: Null < 数值/字符串/日期 < Error
-' 日期比较仅当两个值都为 vbDate 类型时触发
-'=============================================================================
-Private Function CompareValues(ByVal a As Variant, ByVal b As Variant) As Long
-    If IsNull(a) And IsNull(b) Then CompareValues = 0: Exit Function
-    If IsNull(a) Then CompareValues = -1: Exit Function
-    If IsNull(b) Then CompareValues = 1: Exit Function
-    If IsError(a) And IsError(b) Then CompareValues = 0: Exit Function
-    If IsError(a) Then CompareValues = 1: Exit Function
-    If IsError(b) Then CompareValues = -1: Exit Function
-    ' Empty: type-discriminated to prevent IsNumeric(Empty)=True from merging with 0
-    If IsEmpty(a) And IsEmpty(b) Then CompareValues = 0: Exit Function
-    If IsEmpty(a) Then CompareValues = -1: Exit Function
-    If IsEmpty(b) Then CompareValues = 1: Exit Function
-    ' Boolean: type-discriminated to prevent IsNumeric(True)=True from merging with -1
-    If VarType(a) = vbBoolean And VarType(b) = vbBoolean Then
-        If CBool(a) = CBool(b) Then
-            CompareValues = 0
-        ElseIf CBool(a) Then
-            CompareValues = 1   ' True > False
-        Else
-            CompareValues = -1  ' False < True
-        End If
-        Exit Function
-    End If
-    If VarType(a) = vbBoolean Then CompareValues = 1: Exit Function
-    If VarType(b) = vbBoolean Then CompareValues = -1: Exit Function
-    If VarType(a) = vbDate And VarType(b) = vbDate Then
-        If CDate(a) < CDate(b) Then
-            CompareValues = -1
-        ElseIf CDate(a) > CDate(b) Then
-            CompareValues = 1
-        Else
-            CompareValues = 0
-        End If
-    ElseIf IsNumeric(a) And IsNumeric(b) Then
-        If CDbl(a) < CDbl(b) Then
-            CompareValues = -1
-        ElseIf CDbl(a) > CDbl(b) Then
-            CompareValues = 1
-        Else
-            CompareValues = 0
-        End If
-    Else
-        CompareValues = StrComp(SafeStr(a), SafeStr(b), vbTextCompare)
-    End If
-End Function
-
-'=============================================================================
 ' (CompareAtIndices 已删除 — 无调用者的死代码)
 '=============================================================================
 
@@ -726,8 +675,10 @@ Public Function ArrayFind( _
 
     data = NormalizeToArray(arr)
     If Not IsArray(data) Then
-        ArrayFind = -1
-        Exit Function
+        ' 标量按单元素数组处理 (模块契约): =UDF_ARR_FIND(A1, A1) 应返回 0
+        Dim one(0 To 0) As Variant
+        one(0) = data
+        data = one
     End If
 
     If Not CheckIs1D(data) Then Err.Raise ERR_1D_REQUIRED, "ArrayFind", "需要一维数组。"
@@ -742,12 +693,9 @@ Public Function ArrayFind( _
         ElseIf IsNull(data(i)) Or IsNull(value) Then
             ' 跳过 — Null 只等于 Null
         ElseIf IsError(data(i)) And IsError(value) Then
-            ' 精确匹配错误码 — 与 VariantKit.ValuesEqual 语义一致
-            Dim errA As Long, errB As Long
-            On Error Resume Next
-            errA = data(i): errB = value
-            On Error GoTo 0
-            If errA = errB Then
+            ' 精确匹配错误码 — CStr 保留 "Error 2007" 等细分, 与 ValuesEqual 一致
+            ' (对 Error Variant 的隐式 Long 转换在 OERN 下会被吞掉导致全部判等)
+            If CStr(data(i)) = CStr(value) Then
                 ArrayFind = i - lb
                 Exit Function
             End If
@@ -961,6 +909,7 @@ Public Function ArraySample(ByRef arr As Variant, _
     If Not IsArray(data) Or n <= 0 Then ArraySample = Array(): Exit Function
     If Not CheckIs1D(data) Then Err.Raise ERR_1D_REQUIRED, "ArraySample", "需要一维数组。"
     lb = LBound(data): ub = UBound(data): size = ub - lb + 1
+    If size <= 0 Then ArraySample = Array(): Exit Function
     If Not withReplacement And n > size Then n = size
     ReDim result(0 To n - 1)
     If withReplacement Then
@@ -1083,8 +1032,10 @@ Public Function ArrayMin(ByRef arr As Variant) As Variant
 
     data = NormalizeToArray(arr)
     If Not IsArray(data) Then
-        ArrayMin = Empty
-        Exit Function
+        ' 标量按单元素处理
+        Dim oneM(0 To 0) As Variant
+        oneM(0) = data
+        data = oneM
     End If
 
     If Not CheckIs1D(data) Then Err.Raise ERR_1D_REQUIRED, "ArrayMin", "需要一维数组。"
@@ -1112,8 +1063,9 @@ Public Function ArrayMax(ByRef arr As Variant) As Variant
 
     data = NormalizeToArray(arr)
     If Not IsArray(data) Then
-        ArrayMax = Empty
-        Exit Function
+        Dim oneX(0 To 0) As Variant
+        oneX(0) = data
+        data = oneX
     End If
 
     If Not CheckIs1D(data) Then Err.Raise ERR_1D_REQUIRED, "ArrayMax", "需要一维数组。"
@@ -1140,8 +1092,10 @@ Public Function ArraySum(ByRef arr As Variant) As Variant
 
     data = NormalizeToArray(arr)
     If Not IsArray(data) Then
-        ArraySum = 0#
-        Exit Function
+        ' 标量按单元素处理: =UDF_ARR_SUM(A1) 返回 A1 而非 0
+        Dim oneS(0 To 0) As Variant
+        oneS(0) = data
+        data = oneS
     End If
 
     If Not CheckIs1D(data) Then Err.Raise ERR_1D_REQUIRED, "ArraySum", "需要一维数组。"

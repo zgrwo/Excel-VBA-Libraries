@@ -63,7 +63,14 @@ def main() -> int:
 
     grand_pass = 0
     grand_fail = 0
+    grand_skip = 0
+    grand_total = 0
+    grand_pass_cases = 0
+    grand_fail_cases = 0
+    no_run_modules = []
     failed_modules = []
+
+    from tests.crossval import build_common
 
     for label, import_path in modules:
         print(f"\n{'─' * 60}")
@@ -72,6 +79,13 @@ def main() -> int:
         try:
             mod = importlib.import_module(import_path)
             rc = mod.main()
+            summary = getattr(build_common, "LAST_SUMMARY", {})
+            grand_total += summary.get("total", 0)
+            grand_skip += summary.get("skipped", 0)
+            grand_pass_cases += summary.get("passed", 0)
+            grand_fail_cases += summary.get("failed", 0)
+            if summary.get("total", 0) > 0 and summary.get("passed", 0) + summary.get("failed", 0) == 0:
+                no_run_modules.append(label)
             if rc == 0:
                 grand_pass += 1
             else:
@@ -90,8 +104,17 @@ def main() -> int:
     print(f"  Modules tested : {total}")
     print(f"  ALL PASS       : {grand_pass}")
     print(f"  FAILURES       : {grand_fail}")
-    if total > 0:
-        print(f"  Pass rate      : {100.0 * grand_pass / total:.1f}%")
+    print(f"  Test cases     : {grand_total} total | {grand_skip} SKIP (excluded from rate)")
+    executed_cases = grand_pass_cases + grand_fail_cases
+    if executed_cases > 0:
+        print(f"  Effective rate : {100.0 * grand_pass_cases / executed_cases:.1f}%  "
+              f"({grand_pass_cases}P / {grand_fail_cases}F)")
+    else:
+        print("  Effective rate : n/a (no executed cases)")
+    if no_run_modules:
+        print(f"  NO RUNS (all cases skipped): {len(no_run_modules)}")
+        for m in no_run_modules:
+            print(f"    - {m}")
     print(f"{'=' * 60}")
 
     if failed_modules:

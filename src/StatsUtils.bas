@@ -768,7 +768,9 @@ Public Function Skewness(ByRef data As Variant, Optional ByVal colIndex As Long 
 
     m = MeanDouble(arr)
     s = StdDevDouble(arr)
-    If Abs(s) < TOL_STRICT Then
+    Dim skMin As Double, skMax As Double
+    MinMaxDouble arr, skMin, skMax
+    If IsDegenerateSpread(s, skMin, skMax) Then
         Err.Raise ERR_DIV_BY_ZERO, "Skewness", "标准差为零，无法计算偏度。"
         Exit Function
     End If
@@ -805,7 +807,9 @@ Public Function Kurtosis(ByRef data As Variant, Optional ByVal colIndex As Long 
 
     m = MeanDouble(arr)
     s = StdDevDouble(arr)
-    If Abs(s) < TOL_STRICT Then
+    Dim kuMin As Double, kuMax As Double
+    MinMaxDouble arr, kuMin, kuMax
+    If IsDegenerateSpread(s, kuMin, kuMax) Then
         Err.Raise ERR_DIV_BY_ZERO, "Kurtosis", "标准差为零，无法计算峰度。"
         Exit Function
     End If
@@ -1161,8 +1165,16 @@ Public Function Correlation( _
 
     sx = StdDevDouble(arrXD)
     sy = StdDevDouble(arrYD)
-    ' 尺度感知容差: 相对数据最大绝对值, 避免误杀小幅数据 (如 1e-14 尺度)
-    If sx <= TOL_DEFAULT * MaxAbsDouble(arrXD) Or sy <= TOL_DEFAULT * MaxAbsDouble(arrYD) Then
+    ' 零变差判定用偏差尺度 (max-min), 不用数据中心量级 —
+    ' 高偏置低变差数据 (如 [1e13, 1e13+1, 1e13+2]) 不应被误判为零方差
+    Dim cMin As Double, cMax As Double
+    MinMaxDouble arrXD, cMin, cMax
+    If IsDegenerateSpread(sx, cMin, cMax) Then
+        Err.Raise ERR_DIV_BY_ZERO, "Correlation", "方差为零，无法计算相关系数。"
+        Exit Function
+    End If
+    MinMaxDouble arrYD, cMin, cMax
+    If IsDegenerateSpread(sy, cMin, cMax) Then
         Err.Raise ERR_DIV_BY_ZERO, "Correlation", "方差为零，无法计算相关系数。"
         Exit Function
     End If
@@ -1205,7 +1217,10 @@ Public Function RSquare( _
         ssResid = t
     Next i
 
-    If ssTotal <= TOL_DEFAULT * CDbl(n) * MaxAbsDouble(arrAD) * MaxAbsDouble(arrAD) Then
+    Dim rMin As Double, rMax As Double
+    MinMaxDouble arrAD, rMin, rMax
+    Dim ssStd As Double: ssStd = Sqr(ssTotal / CDbl(n - 1))
+    If IsDegenerateSpread(ssStd, rMin, rMax) Then
         Err.Raise ERR_DIV_BY_ZERO, "RSquare", "SS_total 为零，无法计算 R²。"
     Else
         RSquare = 1# - ssResid / ssTotal
@@ -1255,9 +1270,9 @@ Public Function CorrelationMatrix(ByVal data As Variant, _
         ReDim err1(1 To 1, 1 To 1): err1(1, 1) = "Need >=2 data rows": CorrelationMatrix = err1: Exit Function
     End If
 
-    ' 收集数值列
+    ' 收集数值列 (空结果 = 未分配数组, 必须用 IsEmptyArray 探测)
     numColMap = ao.CollectNumericColumns(dataArr, numRows, numCols, colNames, hasHeader, vk)
-    If UBound(numColMap) < LBound(numColMap) Then
+    If vk.IsEmptyArray(numColMap) Then
         ReDim err2(1 To 1, 1 To 1): err2(1, 1) = "No numeric columns": CorrelationMatrix = err2: Exit Function
     End If
     nc = UBound(numColMap)
@@ -1378,8 +1393,9 @@ Public Function ZScore( _
 
     m = MeanDouble(arr)
     s = StdDevDouble(arr)
-    ' 尺度感知容差: 相对数据最大绝对值, 避免误杀小幅数据
-    If s <= TOL_DEFAULT * MaxAbsDouble(arr) Then
+    Dim zMin As Double, zMax As Double
+    MinMaxDouble arr, zMin, zMax
+    If IsDegenerateSpread(s, zMin, zMax) Then
         Err.Raise ERR_DIV_BY_ZERO, "ZScore", "标准差为零，无法计算 Z-Score。"
         Exit Function
     End If
@@ -1428,10 +1444,8 @@ Public Function Normalize( _
     Dim result() As Double
     ReDim result(lb To UBound(arr))
 
-    ' 尺度感知容差: 相对数据最大绝对值, 避免误杀小幅数据
-    Dim scaleR As Double: scaleR = Abs(maxVal)
-    If Abs(minVal) > scaleR Then scaleR = Abs(minVal)
-    If rng <= TOL_DEFAULT * scaleR Then
+    ' 零范围判定: 常量列拒绝; 高偏置数据范围由 max-min 直接给出, 天然尺度无关
+    If IsDegenerateSpread(rng, minVal, maxVal) Then
         Err.Raise ERR_DIV_BY_ZERO, "Normalize", "范围为零，无法归一化。"
         Exit Function
     Else
@@ -1718,12 +1732,17 @@ Public Function TTest(ByRef data1 As Variant, ByRef data2 As Variant, _
     Dim t As Double, df As Double, se As Double
     Select Case testType
         Case 1: ' paired
-            If n1 <> n2 Then Err.Raise ERR_INVALID_INPUT, "TTest", "配对检验需要两组样本量相同。": Exit Function
-            Dim pdiff() As Double, i As Long: ReDim pdiff(LBound(a1) To UBound(a1))
-            For i = LBound(a1) To UBound(a1): pdiff(i) = a1(i) - a2(i): Next i
+            ' 联合逐行配对 (两列同时为数值才保留), 避免两列缺失位置不同导致错配
+            Dim pA As Variant, pB As Variant
+            ExtractPairedDoubles data1, data2, pA, pB, colIdx1, colIdx2
+            Dim nP As Long: nP = UBound(pA) - LBound(pA) + 1
+            If nP < 2 Then Err.Raise ERR_INVALID_INPUT, "TTest", "配对检验需要至少 2 对有效数值。": Exit Function
+            Dim aP1() As Double, aP2() As Double: aP1 = pA: aP2 = pB
+            Dim pdiff() As Double, i As Long: ReDim pdiff(LBound(aP1) To UBound(aP1))
+            For i = LBound(aP1) To UBound(aP1): pdiff(i) = aP1(i) - aP2(i): Next i
             Dim md As Double: md = MeanDouble(pdiff): Dim sd As Double: sd = StdDevDouble(pdiff)
             If sd = 0# Then Err.Raise ERR_DIV_BY_ZERO, "TTest", "配对差值恒定，标准差为零。": Exit Function
-            t = md / (sd / Sqr(n1)): df = n1 - 1
+            t = md / (sd / Sqr(nP)): df = nP - 1
         Case 2: ' equal variance
             Dim sp2 As Double: sp2 = ((n1 - 1) * s1 ^ 2 + (n2 - 1) * s2 ^ 2) / (n1 + n2 - 2)
             se = Sqr(sp2 * (1# / n1 + 1# / n2))
@@ -1848,7 +1867,9 @@ Public Function GammaLn(ByVal x As Double) As Double
             -0.13857109526572012, 9.9843695780195716E-06, 1.5056327351493116E-07)
     End If
     If x < 0.5 Then
-        GammaLn = Log(3.14159265358979 / Sin(3.14159265358979 * x)) - GammaLn(1# - x)
+        ' 反射公式: |Γ(x)| 对应 Log(|sin(πx)|); 直接 Log(sin) 在 (-1,0) 区间
+        ' 因 sin<0 抛裸 Error 5 (如 GammaLn(-0.5))
+        GammaLn = Log(3.14159265358979 / Abs(Sin(3.14159265358979 * x))) - GammaLn(1# - x)
         Exit Function
     End If
     x = x - 1#
@@ -1969,6 +1990,9 @@ End Function
 Public Function TDistCDF(ByVal tVal As Double, ByVal df As Double) As Double
     ' 纯 VBA 实现：P(T > |t|) = 0.5 * I_x(df/2, 0.5)  where x = df/(df + t²)
     ' df 接受 Double — Welch t-test 自由度可为非整数
+    If df <= 0# Then
+        Err.Raise ERR_INVALID_INPUT, "TDistCDF", "自由度 df 必须为正数。"
+    End If
     Dim x As Double: x = df / (df + tVal * tVal)
     Dim a As Double: a = df / 2#
     TDistCDF = 0.5 * BetaReg(x, a, 0.5)
@@ -2002,8 +2026,14 @@ Public Function TInv2T(ByVal alpha As Double, ByVal df As Long) As Double
     ' 二分搜索求解 TDist2T(t, df) = alpha
     Dim lo As Double, hi As Double, mid As Double, p As Double
     Dim i As Long
-    lo = 0#: hi = 100#  ' t=100 对所有 df 的 p 值 < 1E-200
-    For i = 1 To 60
+    lo = 0#: hi = 100#
+    ' 自适应上界: df 较小时 t=100 的双尾 p 远大于 1E-200 (df=1 时约 6e-3),
+    ' 小 alpha 会因上界不足而返回 ≈hi。翻倍直到 p(hi) <= alpha。
+    Do While TDist2T(hi, df) > alpha
+        hi = hi * 2#
+        If hi > 1E+300 Then Exit Do
+    Loop
+    For i = 1 To 200
         mid = (lo + hi) / 2#
         p = TDist2T(mid, df)
         If p > alpha Then lo = mid Else hi = mid
@@ -2023,6 +2053,25 @@ Private Function MaxAbsDouble(ByRef arr() As Double) As Double
         If Abs(arr(i)) > m Then m = Abs(arr(i))
     Next i
     MaxAbsDouble = m
+End Function
+
+' MinMaxDouble — 同时返回数组的最小/最大值
+Private Sub MinMaxDouble(ByRef arr() As Double, ByRef mn As Double, ByRef mx As Double)
+    Dim i As Long
+    mn = arr(LBound(arr)): mx = mn
+    For i = LBound(arr) + 1 To UBound(arr)
+        If arr(i) < mn Then mn = arr(i)
+        If arr(i) > mx Then mx = arr(i)
+    Next i
+End Sub
+
+' IsDegenerateSpread — 零变差判定 (偏差尺度参照)。
+' 参照 max-min 而非数据中心量级: 高偏置低变差数据 (1e13 + 1) 不被误杀,
+' 常量列 (range=spread=0) 仍被拒绝。
+Private Function IsDegenerateSpread(ByVal spread As Double, ByVal minVal As Double, ByVal maxVal As Double) As Boolean
+    Dim rng As Double: rng = maxVal - minVal
+    If rng < 0# Then rng = 0#
+    IsDegenerateSpread = (spread <= TOL_DEFAULT * (rng + spread))
 End Function
 
 ' QuickSortDouble — Hybrid QuickSort + InsertionSort for Double arrays (in-place, ascending)

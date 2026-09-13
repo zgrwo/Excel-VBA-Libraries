@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 CHECKS = [
     ("Static validation (4 layers)", [sys.executable, str(ROOT / "tests/run_all_validation.py")]),
-    ("VBA lint (7 rules)", [sys.executable, str(ROOT / "scripts/vba_lint.py"), "--summary"]),
+    ("VBA lint (10 rules)", [sys.executable, str(ROOT / "scripts/vba_lint.py"), "--summary"]),
     ("Docs consistency", [sys.executable, str(ROOT / "tests/utils/validate_docs.py")]),
     ("Manual anchors", [sys.executable, str(ROOT / "tests/utils/validate_manual_anchors.py")]),
     ("API count header", [sys.executable, str(ROOT / "scripts/generate_counts.py"), "--check"]),
@@ -25,7 +25,7 @@ CHECKS = [
 
 QUICK_CHECKS = [
     ("Static validation (Layer 1)", [sys.executable, str(ROOT / "tests/run_all_validation.py"), "--quick"]),
-    ("VBA lint (7 rules)", [sys.executable, str(ROOT / "scripts/vba_lint.py"), "--summary"]),
+    ("VBA lint (10 rules)", [sys.executable, str(ROOT / "scripts/vba_lint.py"), "--summary"]),
     ("API count header", [sys.executable, str(ROOT / "scripts/generate_counts.py"), "--check"]),
 ]
 

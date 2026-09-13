@@ -153,6 +153,11 @@ Public Function FileExists(ByVal path As String) As Boolean
         FileExists = False
         Exit Function
     End If
+    ' 不触碰未通过安全检查的路径 (UNC → SMB 探测 / ADS / 通配符)
+    If Not ValidateSafePath(path) Then
+        FileExists = False
+        Exit Function
+    End If
     Set fso = GetFSO()
     If fso Is Nothing Then
         FileExists = (Len(Dir(path)) > 0)
@@ -167,6 +172,10 @@ End Function
 Public Function FolderExists(ByVal path As String) As Boolean
     Dim fso As Object
     If Len(path) = 0 Then
+        FolderExists = False
+        Exit Function
+    End If
+    If Not ValidateSafePath(path) Then
         FolderExists = False
         Exit Function
     End If
@@ -323,9 +332,11 @@ Private Function UTF8DecodeBytes(ByRef rawBytes() As Byte) As String
     Do While i <= UBound(rawBytes)
         b = rawBytes(i)
         If b < &H80 Then
-            ' 1-byte: U+0000–U+007F
+            ' 1-byte: U+0000–U+007F (reset minCp — otherwise a preceding
+            ' multi-byte char leaves its minCp behind and ASCII becomes U+FFFD)
             cp = b
             trail = 0
+            minCp = 0
         ElseIf (b And &HE0) = &HC0 Then
             ' 2-byte: U+0080–U+07FF
             cp = b And &H1F
@@ -395,52 +406,7 @@ Continue:
     UTF8DecodeBytes = Join(sb, "")
 End Function
 
-' -- StripUTF8BOM — 字节级 BOM 检测 (Binary I/O)，在所有代码页上可靠 --
-Private Sub StripUTF8BOM(ByRef content As String, ByVal filePath As String)
-    Dim fNum As Integer
-    Dim hasBOM As Boolean
-    Dim b0 As Byte, b1 As Byte, b2 As Byte
-    Dim fNum2 As Long
-    Dim fileSz As Long
-    Dim rawBytes() As Byte
-
-    ' 字节级 BOM 检测 (EF BB BF) — 独立于系统代码页
-    fNum = FreeFile
-    Err.Clear
-    On Error Resume Next
-    Open filePath For Binary As #fNum
-    If LOF(fNum) >= 3 Then
-        Get #fNum, 1, b0: Get #fNum, 2, b1: Get #fNum, 3, b2
-        hasBOM = (b0 = &HEF And b1 = &HBB And b2 = &HBF)
-    End If
-    Close #fNum
-    On Error GoTo 0
-    If Not hasBOM Then Exit Sub
-
-    ' BOM 已在字节级确认。通过二进制重读取跳过前 3 字节,
-    ' 避免 DBCS 代码页中字符级剥离导致的损坏。
-    fNum2 = FreeFile
-    On Error GoTo BOMReadFail  ' 确保读取失败时关闭 fNum2，避免句柄泄漏 (§资源管理)
-    Open filePath For Binary As #fNum2
-    fileSz = LOF(fNum2)
-    If fileSz > 3 Then
-        ReDim rawBytes(fileSz - 4)  ' 0-based: fileSz-3 bytes after BOM
-        Get #fNum2, 4, rawBytes
-        content = StrConv(rawBytes, vbUnicode)  ' ANSI → Unicode, 所有代码页均正确
-    Else
-        content = ""
-    End If
-    Close #fNum2
-    Exit Sub
-
-BOMReadFail:
-    ' 读取失败 — 关闭句柄防止泄漏；content 保持调用方传入的原值 (BOM 剥离为尽力而为)
-    ' ⚠ 此错误处理器仅覆盖 fNum2；fNum 在此作用域设置前已关闭。
-    '    若代码重构在 On Error GoTo 作用域内重新使用 fNum，需同步更新此处。
-    On Error Resume Next
-    Close #fNum2
-    On Error GoTo 0
-End Sub
+' -- StripUTF8BOM 已删除 (死代码: 无调用者; ReadUTF8 由 ADODB 自动剥 BOM, fallback 自行跳过) --
 
 Private Function ReadUnicode(ByVal filePath As String) As String
     Dim stream As Object
@@ -547,11 +513,12 @@ Private Sub WriteUTF8(ByVal filePath As String, ByVal content As String, ByVal b
     stream.Type = 2
     stream.Charset = "UTF-8"
     stream.Open
-    If bom Then stream.WriteText ChrW$(&HFEFF)  ' 写入 UTF-8 BOM
     If Len(content) > 0 Then stream.WriteText content
     stream.SaveToFile filePath, 2 ' adSaveCreateOverWrite
     stream.Close
     Set stream = Nothing
+    ' ADODB.Stream 对 UTF-8 文本流始终写入 BOM; bom=False 时二进制剥离
+    If Not bom Then StripBOMFile filePath
     Exit Sub
 
 ErrHandler:
@@ -567,6 +534,44 @@ ErrHandler:
     Next i
     ' 内容为 ANSI 安全 — 回退到 ANSI (BOM 对 ANSI 文件无关紧要)
     WriteANSI filePath, content, False
+End Sub
+
+' StripBOMFile — 二进制剥离 UTF-8 BOM (EF BB BF); 无 BOM 或失败时静默保持原文件
+Private Sub StripBOMFile(ByVal filePath As String)
+    Dim src As Object, dst As Object
+    Dim head As Variant, rest As Variant
+    On Error GoTo EH
+    Set src = CreateObject("ADODB.Stream")
+    src.Type = 1 ' binary
+    src.Open
+    src.LoadFromFile filePath
+    If src.Size >= 3 Then
+        src.Position = 0
+        head = src.Read(3)
+        If head(0) = &HEF And head(1) = &HBB And head(2) = &HBF Then
+            rest = src.Read
+            src.Close
+            Set src = Nothing
+            Set dst = CreateObject("ADODB.Stream")
+            dst.Type = 1
+            dst.Open
+            If Not IsEmpty(rest) Then dst.Write rest
+            dst.SaveToFile filePath, 2
+            dst.Close
+            Set dst = Nothing
+            Exit Sub
+        End If
+    End If
+    src.Close
+    Set src = Nothing
+    Exit Sub
+
+EH:
+    On Error Resume Next
+    If Not src Is Nothing Then src.Close
+    If Not dst Is Nothing Then dst.Close
+    Set src = Nothing
+    Set dst = Nothing
 End Sub
 
 ' 注: ADODB.Stream 追加需加载整个文件再重写 (读取-修改-写入)
@@ -641,6 +646,7 @@ End Sub
 
 Private Sub WriteANSI(ByVal filePath As String, ByVal content As String, ByVal append As Boolean)
     Dim fNum As Integer
+    Dim savedErrN As Long, savedErrD As String
     On Error GoTo ErrHandler
     fNum = FreeFile
     If append Then
@@ -653,9 +659,12 @@ Private Sub WriteANSI(ByVal filePath As String, ByVal content As String, ByVal a
     Exit Sub
 
 ErrHandler:
+    savedErrN = Err.Number: savedErrD = Err.Description
     If fNum > 0 Then
         Err.Clear: On Error Resume Next: Close #fNum: On Error GoTo 0
     End If
+    ' 不再静默吞错: 回退路径失败必须向调用方传播
+    Err.Raise savedErrN, "WriteANSI", savedErrD
 End Sub
 
 '=============================================================================
@@ -680,6 +689,11 @@ Public Function ListFiles( _
     Dim file As Object
 
     If Len(folder) = 0 Or Len(pattern) = 0 Then
+        result = Array()
+        ListFiles = result
+        Exit Function
+    End If
+    If Not ValidateSafePath(folder) Then
         result = Array()
         ListFiles = result
         Exit Function
@@ -733,8 +747,10 @@ End Function
 Private Sub CollectFiles(ByRef folderObj As Object, ByVal pattern As String, ByRef result() As Variant, ByRef cnt As Long)
     Dim file As Object
     Dim subFolder As Object
+    Dim enumErr As Long, enumDesc As String
 
-    ' 空集合/不可枚举惯用法：Resume Next 探针 + 循环前 Err.Clear（Err.Number 未查为有意——空集合直接结束循环，见 vba-pitfalls）
+    ' 空集合/不可枚举惯用法：Resume Next 探针 + 循环前 Err.Clear。
+    ' 枚举错误不再静默吞没：收集后在过程末尾重抛（vba-SKILL §9.3）。
     Err.Clear
     On Error Resume Next
     For Each file In folderObj.Files
@@ -744,11 +760,22 @@ Private Sub CollectFiles(ByRef folderObj As Object, ByVal pattern As String, ByR
             cnt = cnt + 1
         End If
     Next file
-
-    For Each subFolder In folderObj.SubFolders
-        CollectFiles subFolder, pattern, result, cnt
-    Next subFolder
+    If Err.Number <> 0 Then
+        enumErr = Err.Number: enumDesc = Err.Description
+        Err.Clear
+    End If
+    If enumErr = 0 Then
+        For Each subFolder In folderObj.SubFolders
+            CollectFiles subFolder, pattern, result, cnt
+            If Err.Number <> 0 Then
+                enumErr = Err.Number: enumDesc = Err.Description
+                Err.Clear
+                Exit For
+            End If
+        Next subFolder
+    End If
     On Error GoTo 0
+    If enumErr <> 0 Then Err.Raise enumErr, "CollectFiles", enumDesc
 End Sub
 
 Private Function MatchPattern(ByVal fileName As String, ByVal pattern As String) As Boolean
@@ -776,6 +803,11 @@ Public Function ListFolders( _
     Dim subFolder As Object
 
     If Len(folder) = 0 Then
+        result = Array()
+        ListFolders = result
+        Exit Function
+    End If
+    If Not ValidateSafePath(folder) Then
         result = Array()
         ListFolders = result
         Exit Function
@@ -821,6 +853,7 @@ End Function
 
 Private Sub CollectFolders(ByRef folderObj As Object, ByRef result() As Variant, ByRef cnt As Long)
     Dim subFolder As Object
+    Dim enumErr As Long, enumDesc As String
     Err.Clear
     On Error Resume Next
     For Each subFolder In folderObj.SubFolders
@@ -828,8 +861,14 @@ Private Sub CollectFolders(ByRef folderObj As Object, ByRef result() As Variant,
         result(cnt) = subFolder.path
         cnt = cnt + 1
         CollectFolders subFolder, result, cnt
+        If Err.Number <> 0 Then
+            enumErr = Err.Number: enumDesc = Err.Description
+            Err.Clear: Exit For
+        End If
     Next subFolder
     On Error GoTo 0
+    ' 枚举错误不再静默吞没 (与 CollectFiles 一致)
+    If enumErr <> 0 Then Err.Raise enumErr, "CollectFolders", enumDesc
 End Sub
 
 '=============================================================================
@@ -1007,6 +1046,10 @@ Public Function EnsureFolder(ByVal folderPath As String) As Boolean
         EnsureFolder = False
         Exit Function
     End If
+    If Not ValidateSafePath(folderPath) Then
+        EnsureFolder = False
+        Exit Function
+    End If
 
     folderPath = NormalizePath(folderPath)
     If Right$(folderPath, 1) = "\" And Not (Len(folderPath) = 3 And Mid$(folderPath, 2, 1) = ":") Then
@@ -1115,19 +1158,27 @@ End Function
 ' 已知限制: 不解析符号链接/junction (GetAbsolutePathName 不展开).
 '=============================================================================
 Private Function ValidateSafePath(ByVal path As String) As Boolean
+    Dim norm As String
+    norm = Replace(path, "/", "\")
     ' 拒绝含 ".." 路径段的路径 (目录穿越攻击; 文件名内连续点不受影响)
-    If ContainsTraversal(path) Then Exit Function
-    ' 拒绝 UNC 路径 (远程共享不受本地安全策略约束; 兼容 \\ 与 // 两种写法)
-    If Left$(path, 2) = "\\" Or Left$(path, 2) = "//" Then Exit Function
+    If ContainsTraversal(norm) Then Exit Function
+    ' 拒绝 UNC 路径 — 统一分隔符后再判定, 覆盖 /\ 与 \/ 混合写法
+    If Left$(norm, 2) = "\\" Then Exit Function
+    ' 拒绝通配符 — FSO Delete/Copy 末段支持通配符, 会放大误删范围
+    If InStr(path, "*") > 0 Or InStr(path, "?") > 0 Then Exit Function
+    ' 拒绝备用数据流 (NTFS ADS: file:stream); 盘符冒号位于位置 2 属合法
+    If InStr(3, path, ":") > 0 Then Exit Function
     ' 规范化路径后再检查一次 (防止规范化展开 .. 的攻击)
     Dim fso As Object: Set fso = GetFSO()
     If Not fso Is Nothing Then
         Dim normPath As String: normPath = ""  ' 先置空, 避免探测失败时残留旧值
         On Error Resume Next
-        normPath = fso.GetAbsolutePathName(path)
+        normPath = fso.GetAbsolutePathName(norm)
         On Error GoTo 0
         If Len(normPath) > 0 Then
+            normPath = Replace(normPath, "/", "\")
             If ContainsTraversal(normPath) Then Exit Function
+            If Left$(normPath, 2) = "\\" Then Exit Function
         End If
     End If
     ValidateSafePath = True
@@ -1217,19 +1268,25 @@ Public Function ReadBinaryFile(ByVal filePath As String, Optional ByRef outOk As
     Dim fNum As Integer
     Dim fileLen As Long
 
-    If Not FileExists(filePath) Then
-        Err.Raise ERR_FILE_NOT_FOUND, "ReadBinaryFile", _
-            "文件不存在: " & filePath
-    End If
+    ' 安全检查必须先于存在性探测（避免对越界路径产生 SMB/侧信道探测）
     If Not ValidateSafePath(filePath) Then
         Dim rejReason As String
-        If Left$(filePath, 2) = "\\" Or Left$(filePath, 2) = "//" Then
+        Dim normSep As String: normSep = Replace(filePath, "/", "\")
+        If Left$(normSep, 2) = "\\" Then
             rejReason = "UNC 路径不受支持"
+        ElseIf InStr(filePath, "*") > 0 Or InStr(filePath, "?") > 0 Then
+            rejReason = "路径含通配符"
+        ElseIf InStr(3, filePath, ":") > 0 Then
+            rejReason = "路径含备用数据流 (ADS)"
         Else
             rejReason = "路径含 '..' 目录穿越段"
         End If
         Err.Raise ERR_INVALID_INPUT, "ReadBinaryFile", _
             "路径被安全检查拒绝 (" & rejReason & "): " & filePath
+    End If
+    If Not FileExists(filePath) Then
+        Err.Raise ERR_FILE_NOT_FOUND, "ReadBinaryFile", _
+            "文件不存在: " & filePath
     End If
 
     ' 首选: ADODB.Stream (最快, 可处理大文件)

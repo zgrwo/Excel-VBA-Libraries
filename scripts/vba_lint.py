@@ -1,14 +1,16 @@
 """VBA Static Lint Checker — Excel-VBA-Libraries.
 
-Detects common VBA pitfalls that historically caused repeated bugs:
+Detects common VBA pitfalls that historically caused repeated bugs (10 rules, E001–E010):
   1. Err.Raise misspelling (XxxErr.Raise)
   2. IIf usage (should use If/Else)
   3. ReDim(1 To 0) crash (should use Erase)
   4. Debug.Assert in production code
-  5. Private Const inside procedures (should be module-level)
-  6. Internal Variant abuse (Private functions using As Variant)
-  7. ReDim Preserve inside loop (O(n^2) anti-pattern)
-  8. Missing Option Explicit (forces implicit variable declaration)
+  5. On Error Resume Next without Err.Number check
+  6. Private Const inside procedures (should be module-level)
+  7. Internal Variant abuse (Private functions using As Variant)
+  8. ReDim Preserve inside loop (O(n^2) anti-pattern)
+  9. Missing Option Explicit (forces implicit variable declaration)
+ 10. UDF parameters must be As Variant (red-line rule)
 
 Usage:
   python scripts/vba_lint.py              # lint all src/*.bas + VBA-Core/*.cls

@@ -334,6 +334,11 @@ Public Function Age( _
         refDate = Date
     ElseIf VarType(asOf) = vbDate Then
         refDate = CDate(asOf)
+    ElseIf IsNumeric(asOf) Then
+        ' 日期序列号 (与 AgeYears 对齐; 此前静默改用今天)
+        refDate = CDate(CDbl(asOf))
+    ElseIf IsDate(asOf) Then
+        refDate = CDate(asOf)
     Else
         refDate = Date
     End If

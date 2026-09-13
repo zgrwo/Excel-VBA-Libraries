@@ -742,16 +742,32 @@ Public Function RangeToJSON( _
 End Function
 
 Private Function JSONEscape(ByVal text As String) As String
-    text = Replace(text, "\", "\\")
-    text = Replace(text, """", "\""")
-    text = Replace(text, vbCr, "\r")
-    text = Replace(text, vbLf, "\n")
-    text = Replace(text, vbTab, "\t")
-    text = Replace(text, vbBack, "\b")
-    text = Replace(text, vbFormFeed, "\f")
-    text = Replace(text, vbNullChar, "\u0000")
-    text = Replace(text, ChrW$(11), "\u000b")
-    JSONEscape = text
+    ' 单遍转义: 覆盖所有 <0x20 控制字符 (RFC 8259 §7), 与 JsonUtils.EscapeJSONString 语义一致
+    Dim i As Long, code As Long, ch As String
+    Dim parts() As String, pIdx As Long
+    Dim n As Long: n = Len(text)
+    If n = 0 Then JSONEscape = "": Exit Function
+    ReDim parts(0 To n)
+    pIdx = 0
+    For i = 1 To n
+        ch = Mid$(text, i, 1)
+        code = AscW(ch)
+        Select Case code
+            Case 34: parts(pIdx) = "\""": pIdx = pIdx + 1
+            Case 92: parts(pIdx) = "\\": pIdx = pIdx + 1
+            Case 8: parts(pIdx) = "\b": pIdx = pIdx + 1
+            Case 9: parts(pIdx) = "\t": pIdx = pIdx + 1
+            Case 10: parts(pIdx) = "\n": pIdx = pIdx + 1
+            Case 12: parts(pIdx) = "\f": pIdx = pIdx + 1
+            Case 13: parts(pIdx) = "\r": pIdx = pIdx + 1
+            Case 0 To 31
+                parts(pIdx) = "\u" & Right$("0000" & Hex$(code), 4): pIdx = pIdx + 1
+            Case Else
+                parts(pIdx) = ch: pIdx = pIdx + 1
+        End Select
+    Next i
+    ReDim Preserve parts(0 To pIdx - 1)
+    JSONEscape = Join(parts, "")
 End Function
 
 Private Function JSONValue(ByVal v As Variant) As String
@@ -1028,6 +1044,11 @@ Private Sub SafeWriteValue(ByRef dest As Range, ByRef value As Variant, ByVal ca
         If dest.MergeArea.Address <> dest.Address Then
             Set dest = dest.MergeArea.Cells(1, 1)
         End If
+    End If
+    ' 合并单元格重定向后必须复查公式 — 调用方只检查了原始 dest
+    If dest.HasFormula Or IsNull(dest.HasFormula) Then
+        Err.Raise ERR_FORMULA_RANGE, caller, _
+            "目标单元格包含公式（含合并区域锚点），请先清除公式。"
     End If
     If dest.HasArray Then
         Err.Raise vbObjectError + 1005, caller, _

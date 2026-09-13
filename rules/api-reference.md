@@ -114,7 +114,7 @@
 
 | Function | Signature | Returns | UDF |
 |----------|-----------|---------|-----|
-| SqlEscapeString | `(value)` | String | -- |
+| SqlEscapeString | `(value, [forLike])` | String | -- |
 | MakeSafeColumnName | `(colName)` | String | -- |
 | CloseSqlCache (Sub) | `()` | -- | -- |
 | SqlGetConnection | `([filePath], [outOk])` | Object | -- |
@@ -335,9 +335,9 @@
 | Function | Signature | Returns | UDF |
 |----------|-----------|---------|-----|
 | XmlValidate | `(xml, [errDetail])` | Boolean | UDF_XML_VALIDATE |
-| XmlGet | `(xml, xpath)` | Variant | UDF_XML_GET |
-| XmlGetAttr | `(xml, xpath, attrName)` | Variant | -- |
-| XmlToRange | `(xml, rowXPath, [colNames])` | Variant | UDF_XML_TABLE |
+| XmlGet | `(xml, xpath, [namespaces])` | Variant | UDF_XML_GET |
+| XmlGetAttr | `(xml, xpath, attrName, [namespaces])` | Variant | -- |
+| XmlToRange | `(xml, rowXPath, [colNames], [namespaces])` | Variant | UDF_XML_TABLE |
 
 > **Dependencies**: MSXML2.DOMDocument (Windows built-in). XPath: `/a/b`, `//c`, `[@k='v']`, `[1]`.
 

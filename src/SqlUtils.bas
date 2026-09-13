@@ -74,6 +74,7 @@ Private mCachedConn As Object
 Private mCachedPath As String
 
 Private Const ACE_CONN_PREFIX   As String = "Provider=Microsoft.ACE.OLEDB.12.0;Data Source="
+Private Const ACE16_CONN_PREFIX As String = "Provider=Microsoft.ACE.OLEDB.16.0;Data Source="
 Private Const ACE_EXT_PROP      As String = ";Extended Properties=""Excel 12.0;HDR=YES;IMEX=1"""
 Private Const JET_CONN_PREFIX   As String = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source="
 Private Const JET_EXT_PROP      As String = ";Extended Properties=""Excel 8.0;HDR=YES;IMEX=1"""
@@ -87,7 +88,7 @@ Private Const JET_EXT_PROP      As String = ";Extended Properties=""Excel 8.0;HD
 ' @Function Public Function SqlEscapeString(ByVal value As Variant, Optional ByVal forLike As Boolean = False) As String
 ' @Description 将单引号转义为两个单引号（SQL 标准转义）。forLike=True 时额外转义 LIKE 通配符。
 ' @Args value: 需要转义的字符串。非字符串类型自动转换为字符串。
-' @Args forLike: 是否转义 LIKE 通配符 (%, _, [, ], \) — 默认 False
+' @Args forLike: 是否按 ACE LIKE 语法转义通配符 (% _ [) — 默认 False
 ' @Returns 单引号被转义为 '' 的字符串；forLike=True 时同时转义 LIKE 特殊字符
 '=============================================================================
 Public Function SqlEscapeString(ByVal value As Variant, Optional ByVal forLike As Boolean = False) As String
@@ -102,12 +103,12 @@ Public Function SqlEscapeString(ByVal value As Variant, Optional ByVal forLike A
     End If
     SqlEscapeString = Replace(CStr(value), "'", "''")
     If forLike Then
-        ' ACE OLEDB 默认转义字符为 \ — 必须最先转义反斜杠自身
-        SqlEscapeString = Replace(SqlEscapeString, "\", "\\")
-        SqlEscapeString = Replace(SqlEscapeString, "%", "\%")
-        SqlEscapeString = Replace(SqlEscapeString, "_", "\_")
-        SqlEscapeString = Replace(SqlEscapeString, "[", "\[")
-        SqlEscapeString = Replace(SqlEscapeString, "]", "\]")
+        ' ACE/Jet LIKE 使用方括号字符类作为转义语法; 反斜杠不是转义符
+        ' (实测: LIKE '100\%' 不匹配 '100%', LIKE 'a\[b' 直接报无效模式串).
+        ' 顺序: 先转义 [ 自身, 再包住通配符; ] 单独出现即字面量, 无需处理.
+        SqlEscapeString = Replace(SqlEscapeString, "[", "[[]")
+        SqlEscapeString = Replace(SqlEscapeString, "%", "[%]")
+        SqlEscapeString = Replace(SqlEscapeString, "_", "[_]")
     End If
 End Function
 
@@ -134,7 +135,19 @@ Public Function SqlGetConnection( _
     outOk = False
 
     If Len(filePath) = 0 Then
-        srcPath = ThisWorkbook.FullName
+        Dim defWb As Workbook
+        Set defWb = ThisWorkbook
+        ' .xlam 加载项自身无法被 ACE 打开 — 默认改用活动工作簿
+        If defWb.IsAddIn Then
+            On Error Resume Next
+            Set defWb = ActiveWorkbook
+            On Error GoTo 0
+        End If
+        If defWb Is Nothing Then
+            Err.Raise ERR_INVALID_INPUT, "SqlUtils", _
+                "无可用的活动工作簿。请显式传入 filePath，或先打开目标工作簿。"
+        End If
+        srcPath = defWb.FullName
         If Len(srcPath) = 0 Then
             Err.Raise ERR_INVALID_INPUT, "SqlUtils", _
                 "工作簿尚未保存。请先保存工作簿，或使用 SqlRangeQuery 对 Range 查询。"
@@ -168,7 +181,7 @@ Public Function SqlGetConnection( _
         Set mCachedConn = Nothing: mCachedPath = ""
     End If
 
-    ' 优先 ACE (支持 .xlsx/.xlsm/.xlsb)
+    ' 优先 ACE 12 → ACE 16 (仅 ADE 2016 环境) → Jet (.xls, 32 位)
     connStr = ACE_CONN_PREFIX & srcPath & ACE_EXT_PROP
     On Error Resume Next
     Set conn = CreateObject("ADODB.Connection")
@@ -185,8 +198,20 @@ Public Function SqlGetConnection( _
         Exit Function
     End If
 
-    ' 回退 Jet (仅 .xls)
+    ' 回退 ACE 16 (64 位环境通常仅注册 16.0)
     Dim aceErrDesc As String: aceErrDesc = Err.Description
+    Err.Clear
+    conn.Open ACE16_CONN_PREFIX & srcPath & ACE_EXT_PROP
+    If Err.Number = 0 Then
+        On Error GoTo 0
+        outOk = True
+        Set SqlGetConnection = conn
+        Set mCachedConn = conn: mCachedPath = srcPath
+        Exit Function
+    End If
+
+    ' 回退 Jet (仅 .xls)
+    Dim ace16ErrDesc As String: ace16ErrDesc = Err.Description
     Err.Clear
     connStr = JET_CONN_PREFIX & srcPath & JET_EXT_PROP
     conn.Open connStr
@@ -204,11 +229,18 @@ Public Function SqlGetConnection( _
         On Error Resume Next: conn.Close: On Error GoTo 0
         Set conn = Nothing
     End If
+    Dim bitHint As String
+#If Win64 Then
+    bitHint = "当前为 64 位 Office — 请安装 64 位 Access Database Engine 2010/2016。"
+#Else
+    bitHint = "当前为 32 位 Office — 请安装 32 位 Access Database Engine 2010/2016。"
+#End If
     Err.Raise ERR_NOT_AVAIL, "SqlUtils", _
         "无法建立数据库连接。" & vbLf & _
         "文件: " & srcPath & vbLf & _
-        "ACE: " & aceErrDesc & vbLf & _
-        "Jet: " & jetErrDesc
+        "ACE.12: " & aceErrDesc & vbLf & _
+        "ACE.16: " & ace16ErrDesc & vbLf & _
+        "Jet: " & jetErrDesc & vbLf & bitHint
 End Function
 
 '=============================================================================
@@ -580,6 +612,12 @@ Public Function SqlRangeQuery( _
     If rng.Areas.Count > 1 Then
         Err.Raise ERR_INVALID_INPUT, "SqlRangeQuery", "不支持多区域 Range，请使用单个连续区域。"
     End If
+    ' 基本语法门禁: 仅支持 SELECT ... FROM ...（GARBAGE SQL 不再静默返回全表）
+    Dim sqlTrim As String: sqlTrim = UCase$(Trim$(sql))
+    If Left$(sqlTrim, 6) <> "SELECT" Or InStr(1, sqlTrim, " FROM ", vbTextCompare) = 0 Then
+        Err.Raise ERR_INVALID_INPUT, "SqlRangeQuery", _
+            "仅支持 SELECT ... FROM ... [WHERE ...] 语法: " & sql
+    End If
     Set rs = CreateObject("ADODB.Recordset")
     rs.CursorLocation = 3  ' adUseClient
     data = rng.Value
@@ -594,8 +632,10 @@ Public Function SqlRangeQuery( _
     nRows = UBound(data, 1): nCols = UBound(data, 2)
 
     ' Build field names with deduplication
+    ' (vbTextCompare: ADO Fields 集合名大小写不敏感, "Name"/"name" 必须去重)
     Dim colNames As Object, colName As String, colSuffix As Long
     Set colNames = CreateObject("Scripting.Dictionary")
+    colNames.CompareMode = vbTextCompare
     For j = 1 To nCols
         colName = MakeSafeColumnName(CStr(data(1, j)))
         If colNames.Exists(colName) Then
@@ -606,47 +646,69 @@ Public Function SqlRangeQuery( _
             colName = colName & "_" & colSuffix
         End If
         colNames.Add colName, True
-        ' 自动检测列类型: 数值列用 adDouble 防止字符串比较陷阱 (#45)
-        ' 默认 isNumericCol=False: 全空列按 adVarChar 处理, 只有发现实际数值数据时才设为 True
-        Dim isNumericCol As Boolean: isNumericCol = False
-        Dim foundAny As Boolean: foundAny = False
+        ' 自动检测列类型:
+        '   数值子类型白名单 → adDouble (防止字符串比较陷阱 #45)
+        '   Date → adDate; 数字样文本 ("01234"/长ID) 不转换, 防止前导零/精度损坏
+        '   Error 单元格跳过 (不参与推断, 也不写入)
+        Dim hasNum As Boolean: hasNum = False
+        Dim hasDate As Boolean: hasDate = False
+        Dim hasText As Boolean: hasText = False
+        Dim vt As Long
         For i = 2 To nRows
-            If Not IsEmpty(data(i, j)) And Not IsNull(data(i, j)) Then
-                foundAny = True
-                If VarType(data(i, j)) = vbBoolean Or Not IsNumeric(data(i, j)) Then
-                    isNumericCol = False
-                    Exit For
-                End If
-                isNumericCol = True
+            If Not IsEmpty(data(i, j)) And Not IsNull(data(i, j)) And Not IsError(data(i, j)) Then
+                vt = VarType(data(i, j))
+                Select Case vt
+                    Case vbInteger, vbLong, vbSingle, vbDouble, vbCurrency, vbDecimal
+                        hasNum = True
+                    Case vbDate
+                        hasDate = True
+                    Case Else
+                        hasText = True
+                        Exit For
+                End Select
             End If
         Next i
-        If isNumericCol Then
-            rs.Fields.Append colName, 5, , 32  ' adDouble
+        If hasText Or (hasNum And hasDate) Then
+            rs.Fields.Append colName, 202, 32767    ' adVarWChar, DefinedSize=32767
+        ElseIf hasDate Then
+            rs.Fields.Append colName, 7             ' adDate
+        ElseIf hasNum Then
+            rs.Fields.Append colName, 5, 32         ' adDouble, DefinedSize=32
         Else
-            rs.Fields.Append colName, 200, , 32  ' adVarChar
+            rs.Fields.Append colName, 202, 32767    ' 全空列 → 文本
         End If
     Next j
     rs.Open
     For i = 2 To nRows
         rs.AddNew
         For j = 1 To nCols
-            If Not IsEmpty(data(i, j)) And Not IsNull(data(i, j)) Then
+            If Not IsEmpty(data(i, j)) And Not IsNull(data(i, j)) And Not IsError(data(i, j)) Then
                 rs.Fields(j - 1).Value = data(i, j)
             End If
         Next j
         rs.Update
     Next i
 
-    ' Extract WHERE clause → rs.Filter
+    ' Extract WHERE clause → rs.Filter (词边界识别, 容忍 WHERE( 与制表符)
     Dim sqlUpper As String: sqlUpper = UCase$(sql)
     Dim wherePos As Long
-    wherePos = InStr(1, sqlUpper, " WHERE ", vbTextCompare)
+    wherePos = InStr(1, sqlUpper, "WHERE", vbTextCompare)
+    If wherePos > 0 Then
+        Dim beforeCh As String, afterCh As String
+        beforeCh = "": If wherePos > 1 Then beforeCh = Mid$(sqlUpper, wherePos - 1, 1)
+        afterCh = "": If wherePos + 5 <= Len(sqlUpper) Then afterCh = Mid$(sqlUpper, wherePos + 5, 1)
+        Dim beforeOk As Boolean, afterOk As Boolean
+        beforeOk = (beforeCh = "" Or beforeCh = " " Or beforeCh = vbTab Or beforeCh = ")" Or beforeCh = ";")
+        afterOk = (afterCh = "" Or afterCh = " " Or afterCh = vbTab Or afterCh = vbLf Or afterCh = "(")
+        If Not (beforeOk And afterOk) Then wherePos = 0
+    End If
+    If InStr(1, sqlUpper, "ORDER BY", vbTextCompare) > 0 Then
+        Err.Raise ERR_INVALID_INPUT, "SqlRangeQuery", _
+            "不支持 ORDER BY — 仅支持 SELECT * ... [WHERE ...]"
+    End If
     If wherePos > 0 Then
         Dim filterStr As String
-        Dim orderPos As Long
-        orderPos = InStr(wherePos + 1, sqlUpper, " ORDER BY ", vbTextCompare)
-        If orderPos = 0 Then orderPos = Len(sql) + 1
-        filterStr = Trim$(Mid$(sql, wherePos + 7, orderPos - wherePos - 7))
+        filterStr = Trim$(Mid$(sql, wherePos + 5))
         If Len(filterStr) > 0 Then
             On Error Resume Next
             rs.Filter = filterStr
@@ -892,9 +954,12 @@ Public Sub Test_SqlUtils()
         If Not (ok = True) Then Err.Raise 5
         If Not (result(1, 1) = "SheetName") Then Err.Raise 5
         ' 至少包含我们刚创建的工作表
+        ' (ACE OpenSchema 返回带引号与 $ 后缀的表名, 如 'Sheet1$')
         Dim found As Boolean: found = False
         For i = 2 To UBound(result, 1)
-            If result(i, 1) = wsName Then found = True: Exit For
+            Dim rawName As String: rawName = Replace(CStr(result(i, 1)), "'", "")
+            If Right$(rawName, 1) = "$" Then rawName = Left$(rawName, Len(rawName) - 1)
+            If StrComp(rawName, wsName, vbTextCompare) = 0 Then found = True: Exit For
         Next i
         If Not (found = True) Then Err.Raise 5
     End If

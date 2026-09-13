@@ -72,7 +72,11 @@ def _check_backtick_paths(doc: Path, root: Path, problems: list[str]) -> None:
             continue
         if any(mk in target for mk in BACKTICK_SKIP_MARKERS):
             continue
-        if not (root / target.rstrip("/")).exists():
+        # 剥离 :行号 / :行号-行号 / :行号,行号 后缀 (审查报告常用 file:line 引用)
+        check_target = re.sub(r':\d+(?:[-,\s]\d+)*$', '', target)
+        if not check_target:
+            continue
+        if not (root / check_target.rstrip("/")).exists():
             problems.append(f"[无效路径] {rel}: 反引号路径不存在 -> {raw}")
 
 

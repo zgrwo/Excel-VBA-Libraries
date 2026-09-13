@@ -2037,7 +2037,7 @@ SqlListTables([filePath], outOk) As Variant()
 
 > **环境要求**: SqlUtils 依赖 ADODB 和 ACE/Jet OLEDB 提供程序。64 位 Office 需安装 Access Database Engine。若工作簿未保存，使用 SqlRangeQuery 可直接对 Range 查询。
 >
-> **⚠️ SQL 注入防护**: ACE OLEDB Excel ISAM 驱动不支持参数化查询。使用 `SqlEscapeString()` 转义来自单元格的用户输入（`'` → `''`），避免在 `WHERE`/`VALUES` 子句中直接拼接未转义的用户输入: `=UDF_SQL_QUERY("SELECT * FROM [Sheet1$] WHERE Name = '" & SqlEscapeString(A1) & "'")`。注意: Error 值单元格（#N/A、#VALUE! 等）会被静默转为空字符串（防 `CStr` 崩溃）——上游数据含 Error 时可能得到空结果集，请先清理数据。
+> **⚠️ SQL 注入防护**: ACE OLEDB Excel ISAM 驱动不支持参数化查询。使用 `SqlEscapeString()` 转义来自单元格的用户输入（`'` → `''`），避免在 `WHERE`/`VALUES` 子句中直接拼接未转义的用户输入: `=UDF_SQL_QUERY("SELECT * FROM [Sheet1$] WHERE Name = '" & SqlEscapeString(A1) & "'")`。注意: Error 值单元格（#N/A、#VALUE! 等）会被静默转为空字符串（防 `CStr` 崩溃）——上游数据含 Error 时可能得到空结果集，请先清理数据。LIKE 模式请使用 `SqlEscapeString(value, True)`（ACE 方括号转义语法：`%`→`[%]`、`_`→`[_]`、`[`→`[[]`）。
 >
 > **命名约定**: 工作表名在 SQL 中需加 `$` 后缀并用方括号包裹，如 `[Sheet1$]`。列名含特殊字符时 SqlRangeQuery 会自动清理。
 ---
@@ -2498,7 +2498,7 @@ Ap = MatrixPower(A, 3)             ' A^3 (二分法)
 | [`Max`](#max) | `(data, [colIndex])` | 最大值 (VBA-only) | Variant (Double) |
 | [`Median`](#median) | `(data, [colIndex])` | 中位数 | Variant (Double) |
 | [`Min`](#min) | `(data, [colIndex])` | 最小值 (VBA-only) | Variant (Double) |
-| [`MinMax`](#minmax) | `(data, [outMin], [outMax])` | 同时返回最小值/最大值 | Variant Array |
+| [`MinMax`](#minmax) | `(data, [outMin], [outMax], [colIndex])` | 同时返回最小值/最大值 | Variant Array |
 | [`Mode`](#mode) | `(data, [colIndex])` | 众数 (唯一时返回 #N/A) | Variant (Double) |
 | [`GeometricMean`](#geometricmean) | `(data, [colIndex])` | 几何均值 (对数空间防溢出) | Variant (Double) |
 | [`HarmonicMean`](#harmonicmean) | `(data, [colIndex])` | 调和均值 | Variant (Double) |
@@ -2629,8 +2629,10 @@ mm = MinMax(Range("A1:A100"))          ' -> Array(min, max)
 =UDF_STAT_MEAN(data, [colIndex])
 =UDF_STAT_MEDIAN(data, [colIndex])
 =UDF_STAT_MODE(data, [colIndex])
-=UDF_STAT_MINMAX(data, [colIndex])
+=UDF_STAT_MINMAX(data, [outMin], [outMax], [colIndex])
 ```
+
+> `outMin`/`outMax` 为保留参数（ByVal，不影响返回值）；列选择请使用第 4 参数 `colIndex`（默认 1）。
 
 <a id="stddev"></a>
 <a id="stddevp"></a>
@@ -3448,7 +3450,7 @@ sweep = FactorSweep(model, 1, 100#, 140#, 11)
 <a id="keepchars"></a>
 #### RemoveChars / KeepChars
 
-RemoveChars 从字符串中移除指定字符集中的所有字符；KeepChars 仅保留指定字符集中的字符。
+RemoveChars 从字符串中移除指定字符集中的所有字符；KeepChars 仅保留指定字符集中的字符。两者均为大小写敏感（`RemoveChars("aA","a")` → `"A"`）。
 
 **VBA Usage**
 ```vb
@@ -4184,7 +4186,7 @@ s = RegexEscape("1+1=2?")  ' → "1\+1=2\?"
 |------|------|------|--------|
 | [`JsonParse`](#jsonparse) | `(jsonText)` | 解析 JSON 字符串 **仅 VBA** | Variant (Dictionary/Array/标量) |
 | [`JsonGet`](#jsonget) | `(json, path)` | 按路径提取值 **仅 VBA** | Variant |
-| [`JsonToRange`](#jsontorange) | `(json, destCell, [headers])` | JSON 对象数组输出到工作表 **Sub** | — |
+| [`JsonToRange`](#jsontorange) | `(json, destCell)` | JSON 对象数组输出到工作表 **Sub** | — |
 | [`JsonGetKeys`](#jsongetkeys) | `(json)` | 列出对象所有键 | String() |
 | [`JsonIsValid`](#jsonisvalid) | `(jsonText)` | 校验 JSON 合法性 (不抛错) | Boolean |
 | [`JsonStringify`](#jsonstringify) | `(value)` | VBA Variant → JSON 字符串 **仅 VBA** | String |
@@ -4317,7 +4319,7 @@ s = JsonStringify(Array(1, 2, 3))  ' → "[1,2,3]"
 
 **VBA Usage**
 ```vb
-JsonToRange(jsonText, destCell, [includeHeaders])
+JsonToRange(jsonText, destCell)
 ```
 
 ```vb
@@ -5499,7 +5501,7 @@ mw = MolecularWeight("CuSO4·5H2O")    ' → 249.69  (supports · and + hydrate 
 
 #### DilutionSolve
 
-C1 * V1 = C2 * V2 求解器。四个参数中传入三个数值，待求解参数传 0 或省略。返回求解值。
+C1 * V1 = C2 * V2 求解器。四个参数中传入三个数值，待求解参数传 Empty（或留空/省略；0 是有效值，不作为未知标记）。返回求解值。
 
 **VBA Usage**
 ```vb
@@ -5507,8 +5509,8 @@ DilutionSolve(c1, v1, c2, v2) As Double
 ```
 
 ```vb
-v2_needed = DilutionSolve(10, 100, 5, 0)  ' → 200
-c2_final = DilutionSolve(10, 50, 0, 200)  ' → 2.5
+v2_needed = DilutionSolve(10, 100, 5, Empty)  ' → 200
+c2_final = DilutionSolve(10, 50, Empty, 200)  ' → 2.5
 ```
 
 **UDF Usage**
@@ -5542,7 +5544,7 @@ m = MolesToMass(2, 18.015)     ' → 36.03 (g H2O)
 
 #### Density
 
-密度求解器：通过 m/V/rho 中任意两个已知量计算第三个。
+密度求解器：通过 m/V/rho 中任意两个已知量计算第三个，待求项传 Empty（或留空/省略；0 是有效值）。
 
 ```vb
 Density(m, v, rho) As Double
@@ -5551,7 +5553,7 @@ Density(m, v, rho) As Double
 单位约定：mass 单位 g，volume 单位 mL，rho 单位 g/mL。
 
 ```vb
-v = Density(100, 0, 2.5)  ' → 40 (体积 = 质量/密度)
+v = Density(100, Empty, 2.5)  ' → 40 (体积 = 质量/密度)
 ```
 
 **UDF Usage**
@@ -5621,30 +5623,29 @@ v = ConvertTemperature(100, "C", "F")     ' → 212
 
 #### ConvertStandard
 
-将气体在任意 (P, T) 条件下的体积换算为标态 (0°C, 1 atm) 下的体积和质量。返回含 V_std 和 mass 的 2D 数组。
+将气体在任意 (P, T) 条件下的体积换算为标态 (0°C, 101325 Pa) 下的体积和质量。返回 1D 数组：result(0)=标况体积 (m³)，result(1)=标况质量 (kg)。
 
 **VBA Usage**
 ```vb
-ConvertStandard(v, p, T, MW) As Variant(,)
+ConvertStandard(volume_m3, pressure_Pa, temperature_K, molWeight) As Variant
 ```
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| v | Double | 体积 (L) |
-| p | Double | 压力 (kPa) |
-| T | Double | 温度 (°C) |
-| MW | Double | 摩尔质量 (g/mol) |
+| volume_m3 | Double | 体积 (m³) |
+| pressure_Pa | Double | 压力 (Pa) |
+| temperature_K | Double | 温度 (K) |
+| molWeight | Double | 摩尔质量 (g/mol) |
 
 ```vb
 Dim result As Variant
-result = ConvertStandard(10, 202.65, 25, 28.01)
-' result(0,0)="标况体积(L)", result(0,1)="标况质量(g)"
-' result(1,0)=18.61, result(1,1)=23.27
+result = ConvertStandard(0.01, 202650, 298.15, 28.01)
+' result(0) ≈ 0.01833 (m³), result(1) ≈ 0.02290 (kg)
 ```
 
 **UDF Usage**
 ```
-=UDF_PC_CONVERTSTANDARD(v, p, T, MW)
+=UDF_PC_CONVERTSTANDARD(volume_m3, pressure_Pa, temperature_K, molWeight)
 ```
 
 #### IdealGasLaw
@@ -5670,21 +5671,23 @@ n = IdealGasLaw(202650, 0.01, Empty, 298)  ' → ~0.818
 
 #### CompressFactorPR
 
-Peng-Robinson 状态方程计算压缩因子 Z。需要临界温度 Tc (K)、临界压力 Pc (kPa) 和偏心因子 omega。
+Peng-Robinson 状态方程计算压缩因子 Z。需要临界温度 Tc (K)、临界压力 Pc (Pa) 和偏心因子 omega。
 
 ```vb
 CompressFactorPR(P, T, Tc, Pc, omega) As Double
 ```
 
 ```vb
-Z = CompressFactorPR(1013.25, 300, 304.2, 7380, 0.225)  ' CO2 在 1 atm, 27°C
+Z = CompressFactorPR(101325, 300, 304.2, 7.38E+6, 0.225)  ' CO2 在 1 atm, 27°C
 ```
 
 **UDF Usage**
 ```
-=UDF_PC_COMPRESS(P, T, Tc, Pc, omega)
+=UDF_PC_COMPRESS(P, T, Tc, Pc)
 =UDF_PC_ZFACTOR(P, T, gasName)
 ```
+
+> `UDF_PC_COMPRESS` 仅接受 4 个参数（omega 由内置临界常数表提供）；如需自定义 omega，请使用 VBA 函数 `CompressFactorPR`。
 
 <a id="recipe-unit-conversion"></a>
 ### Recipe 15.3 — 单位换算
@@ -5722,14 +5725,14 @@ CylinderStdVolumeFromMass(netWt, gasFormula) As Double
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | cylVol | Double | 钢瓶容积 (L) |
-| fillP | Double | 充装压力 (kPa) |
-| fillT | Double | 充装温度 (°C) |
+| fillP | Double | 充装压力 (Pa) |
+| fillT | Double | 充装温度 (K) |
 | gasName | String | 气体名称 (如 "CO2", "N2", "O2") |
 | netWt | Double | 钢瓶净重 (kg) |
 | gasFormula | String | 化学式 (如 "CO2", "N2") |
 
 ```vb
-V_std = CylinderStdVolume(40, 15000, 25, "N2")          ' 40L N2 钢瓶标态体积
+V_std = CylinderStdVolume(40, 15E+6, 298.15, "N2")      ' 40L N2 钢瓶, 15MPa, 25°C
 V_std = CylinderStdVolumeFromMass(25, "CO2")            ' 25kg CO2 钢瓶标态体积
 ```
 

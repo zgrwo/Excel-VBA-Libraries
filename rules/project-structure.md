@@ -55,7 +55,7 @@ ExcelVBA函数库/
 │   ├── VBA_Libraries.xlsm        # 含全部模块 ⚠️ 二进制
 │   └── VBA_Libraries.xlam        # 加载项版本 ⚠️ 二进制
 ├── scripts/                        # 开发工具脚本
-│   ├── vba_lint.py               # VBA 静态检查（8 条规则）
+│   ├── vba_lint.py               # VBA 静态检查（10 条规则 E001–E010）
 │   ├── generate_counts.py        # 函数计数自动生成
 │   ├── generate_coverage.py      # 测试覆盖率报告生成
 │   ├── generate_api_docs.py      # API 签名提取

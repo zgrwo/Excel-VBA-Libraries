@@ -348,6 +348,57 @@ TEST_CASES = [
 ]
 
 
+# 2026-09-13 回归: 空数组路径/控制字符/溢出/Range 双路径
+def _json_err_probe(excel, wb, ws, runner, tc, args):
+    """VBA 探针: 在 VBA 内部捕获错误码并返回 (COM 不传递 VBA 错误描述)."""
+    vbproj = wb.VBProject
+    for comp in list(vbproj.VBComponents):
+        if comp.Name == "JsonProbe":
+            vbproj.VBComponents.Remove(comp)
+    comp = vbproj.VBComponents.Add(1)  # vbext_ct_StdModule
+    comp.Name = "JsonProbe"
+    comp.CodeModule.AddFromString(
+        "Public Function ProbeErr(ByVal which As String) As Double\r\n"
+        "    On Error GoTo EH\r\n"
+        "    Dim v As Variant\r\n"
+        "    If which = \"overflow\" Then\r\n"
+        "        v = JsonParse(\"9e308\")\r\n"
+        "    ElseIf which = \"stringify_empty\" Then\r\n"
+        "        ProbeErr = IIf(JsonStringify(JsonParse(\"[]\")) = \"[]\", 1, 0)\r\n"
+        "        Exit Function\r\n"
+        "    Else\r\n"
+        "        v = JsonGet(\"[]\", \"[0]\")\r\n"
+        "    End If\r\n"
+        "    ProbeErr = 0\r\n"
+        "    Exit Function\r\n"
+        "EH: ProbeErr = Err.Number\r\n"
+        "End Function")
+    from tests.test_utils import run_macro
+    err_num = run_macro(excel, wb, "JsonProbe.ProbeErr", args[0])
+    return float(err_num), float(args[1]), 0.0
+
+
+TEST_CASES += [
+    {"name": "JsonIsValid_control_char", "func": "JsonIsValid",
+     "args": lambda: ('"a\nb"',), "py_ref": lambda a: False, "result_type": "bool"},
+    # ERR_INVALID_JSON = vbObjectError + 1301 = -2147220203
+    {"name": "JsonParse_overflow", "func": "JsonParse",
+     "args": lambda: ("overflow", -2147220203.0),
+     "reconstruct": _json_err_probe, "py_ref": lambda a: -2147220203.0},
+    # ERR_PATH_NOT_FOUND = vbObjectError + 1302 = -2147220202
+    {"name": "JsonGet_empty_array_index", "func": "JsonGet",
+     "args": lambda: ("emptyidx", -2147220202.0),
+     "reconstruct": _json_err_probe, "py_ref": lambda a: -2147220202.0},
+    {"name": "JsonStringify_Range", "func": "JsonStringify", "is_udf": True,
+     "args": lambda: ([[1, 2], [3, 4]],),
+     "py_ref": lambda a: "[[1,2],[3,4]]", "result_type": "string"},
+    # 内部往返: JsonStringify(JsonParse("[]")) 必须得 "[]" (此前 Error 9)
+    {"name": "JsonStringify_parsed_empty", "func": "JsonParse",
+     "args": lambda: ("stringify_empty", 1.0),
+     "reconstruct": _json_err_probe, "py_ref": lambda a: 1.0},
+]
+
+
 def main() -> int:
     runner = CrossValRunner("JsonUtils", MODULE_PATHS)
     runner.run_all(TEST_CASES)

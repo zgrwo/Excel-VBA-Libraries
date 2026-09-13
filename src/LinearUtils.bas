@@ -260,27 +260,30 @@ Public Function RangeToMatrix(ByVal rng As Variant) As Double()
     Static vk As VariantKit: If vk Is Nothing Then Set vk = New VariantKit
     If Not TypeOf rng Is Range Then
         If IsArray(rng) Then
-            Dim tmpDoubles() As Double
-            tmpDoubles = vk.ToDoubles(rng)
-            ' Ensure always 2D (matrix convention)
-            Dim dLb As Long, dUb As Long
-            On Error Resume Next
-            dLb = LBound(tmpDoubles, 2)
-            If Err.Number <> 0 Then
-                ' 1D → wrap as single-row 2D matrix (1 To 1, 1 To n)
-                Err.Clear: On Error GoTo 0
-                Dim rowMat() As Double
-                Dim dLen As Long: dLen = UBound(tmpDoubles) - LBound(tmpDoubles) + 1
-                ReDim rowMat(1 To 1, 1 To dLen)
-                Dim di As Long
-                For di = 1 To dLen
-                    rowMat(1, di) = tmpDoubles(LBound(tmpDoubles) + di - 1)
-                Next di
-                RangeToMatrix = rowMat
-            Else
-                On Error GoTo 0
-                RangeToMatrix = tmpDoubles
+            ' 保持 2D 形状 (旧的 ToDoubles 路径会把任意 2D 数组展平成 1×N)
+            Dim m As Variant
+            m = vk.Normalize2D(rng)
+            If Not IsArray(m) Then
+                Err.Raise ERR_INVALID_INPUT, "RangeToMatrix", "数组无法转换为 2D 矩阵。"
             End If
+            Dim nR As Long: nR = UBound(m, 1) - LBound(m, 1) + 1
+            Dim nC As Long: nC = UBound(m, 2) - LBound(m, 2) + 1
+            If nR < 1 Or nC < 1 Then
+                Err.Raise ERR_INVALID_INPUT, "RangeToMatrix", "数组为空。"
+            End If
+            Dim outMat() As Double
+            ReDim outMat(1 To nR, 1 To nC)
+            Dim ri As Long, ci As Long
+            For ri = 1 To nR
+                For ci = 1 To nC
+                    If Not vk.IsNumericCell(m(ri, ci)) Then
+                        Err.Raise ERR_INVALID_INPUT, "RangeToMatrix", _
+                            "数组元素 (" & ri & "," & ci & ") 包含非数值数据。"
+                    End If
+                    outMat(ri, ci) = CDbl(m(ri, ci))
+                Next ci
+            Next ri
+            RangeToMatrix = outMat
             Exit Function
         End If
         Err.Raise ERR_RANGE_NOTHING, "RangeToMatrix", "输入不是 Range 或数组。"
@@ -823,9 +826,10 @@ Private Sub JacobiSVD(ByRef A() As Double, _
         Next row
         a_jj = Sqr(a_jj)
         S(j, j) = a_jj
-        If a_jj > NUM_EPSILON Then
+        If a_jj > 0# Then
             For row = 1 To m: U(row, j) = U(row, j) / a_jj: Next row
         Else
+            ' 仅精确零列置零; 不做 eps 截断 (U 必须保持正交, 截断由 PINV 容差控制)
             For row = 1 To m: U(row, j) = 0#: Next row
         End If
     Next j
@@ -1625,18 +1629,17 @@ Public Sub LUDecomposition(ByRef A() As Double, _
     ReDim L(1 To n, 1 To n)
     ReDim U(1 To n, 1 To n)
 
-    ' 计算相对容差 (基于矩阵最大绝对值, 纯相对 — 不抬升小量级矩阵)
-    Dim pivotTol As Double: pivotTol = 0#
-    For i = 1 To n
-        For j = 1 To n
-            If Abs(work(i, j)) > pivotTol Then pivotTol = Abs(work(i, j))
-        Next j
-    Next i
-    If pivotTol = 0# Then
-        pivotTol = NUM_EPSILON  ' 零矩阵: 绝对下限保证奇异判定
-    Else
-        pivotTol = pivotTol * NUM_EPSILON * CDbl(n)
-    End If
+    ' 奇异判据: 以各列原始最大绝对值为参考 (LAPACK 式相对判据)。
+    ' 不用全矩阵 maxAbs: 那会把 diag(1e10,1e-8) 这类高动态范围良态矩阵误判为奇异。
+    Dim colMax() As Double
+    ReDim colMax(1 To n)
+    Dim cmI As Long, cmJ As Long
+    For cmJ = 1 To n
+        colMax(cmJ) = 0#
+        For cmI = 1 To n
+            If Abs(work(cmI, cmJ)) > colMax(cmJ) Then colMax(cmJ) = Abs(work(cmI, cmJ))
+        Next cmI
+    Next cmJ
 
     For k = 1 To n
         ' 部分主元: 在第 k 列中找绝对值最大的行
@@ -1653,7 +1656,7 @@ Public Sub LUDecomposition(ByRef A() As Double, _
                 pivot = i
             End If
         Next i
-        If maxVal < pivotTol Then
+        If maxVal = 0# Or maxVal < colMax(k) * NUM_EPSILON * CDbl(n) Then
             Err.Raise ERR_SINGULAR, "LUDecomposition", "矩阵奇异或接近奇异，无法进行 LU 分解。"
         End If
 
@@ -1686,7 +1689,7 @@ Public Sub LUDecomposition(ByRef A() As Double, _
             For j = 1 To k - 1
                 L(i, k) = L(i, k) - L(i, j) * U(j, k)
             Next j
-            If Abs(U(k, k)) < pivotTol Then
+            If Abs(U(k, k)) = 0# Then
                 Err.Raise ERR_SINGULAR, "LUDecomposition", _
                     "主元为零 (pivot[" & k & "]=" & U(k, k) & ")。矩阵奇异。"
             End If
@@ -2227,22 +2230,37 @@ Public Function PolyFit(ByRef rngX As Variant, ByRef rngY As Variant, _
     xi = UBound(y, 2): y2d = (Err.Number = 0): Err.Clear
     On Error GoTo ErrHandler
     If x2d Then
-        Dim xTmp() As Double: ReDim xTmp(LBound(x, 1) To UBound(x, 1))
-        For xi = LBound(x, 1) To UBound(x, 1): xTmp(xi) = x(xi, 1): Next xi
-        x = xTmp
+        If UBound(x, 1) = LBound(x, 1) Then
+            ' 单行 (1×n) → 按列展平
+            Dim xTmpR() As Double: ReDim xTmpR(LBound(x, 2) To UBound(x, 2))
+            For xi = LBound(x, 2) To UBound(x, 2): xTmpR(xi) = x(LBound(x, 1), xi): Next xi
+            x = xTmpR
+        Else
+            Dim xTmp() As Double: ReDim xTmp(LBound(x, 1) To UBound(x, 1))
+            For xi = LBound(x, 1) To UBound(x, 1): xTmp(xi) = x(xi, LBound(x, 2)): Next xi
+            x = xTmp
+        End If
     End If
     If y2d Then
-        Dim yt() As Double: ReDim yt(LBound(y, 1) To UBound(y, 1))
-        For xi = LBound(y, 1) To UBound(y, 1): yt(xi) = y(xi, 1): Next xi
-        y = yt
+        If UBound(y, 1) = LBound(y, 1) Then
+            Dim ytR() As Double: ReDim ytR(LBound(y, 2) To UBound(y, 2))
+            For xi = LBound(y, 2) To UBound(y, 2): ytR(xi) = y(LBound(y, 1), xi): Next xi
+            y = ytR
+        Else
+            Dim yt() As Double: ReDim yt(LBound(y, 1) To UBound(y, 1))
+            For xi = LBound(y, 1) To UBound(y, 1): yt(xi) = y(xi, LBound(y, 2)): Next xi
+            y = yt
+        End If
     End If
     Dim nX As Long: nX = UBound(x) - LBound(x) + 1
     Dim nY As Long: nY = UBound(y) - LBound(y) + 1
     If nX <> nY Then Err.Raise ERR_INVALID_SIZE, "PolyFit", "x 与 y 长度不匹配: " & nX & " vs " & nY
+    If degree < 0 Then Err.Raise ERR_INVALID_INPUT, "PolyFit", "degree 不能为负。"
     If nX < degree + 1 Then Err.Raise ERR_INVALID_SIZE, "PolyFit", _
         "数据点不足: 需要至少 " & (degree + 1) & " 个点，实际只有 " & nX & " 个。"
     Dim n As Long: n = nX
     Dim lb As Long: lb = LBound(x)
+    Dim ylb As Long: ylb = LBound(y)
     ' 构建设计矩阵
     Dim Xmat() As Double, i As Long, j As Long
     ReDim Xmat(1 To n, 1 To degree + 1)
@@ -2257,7 +2275,7 @@ Public Function PolyFit(ByRef rngX As Variant, ByRef rngY As Variant, _
     Dim Qmat() As Double, Rmat() As Double
     QRDecomposition Xmat, Qmat, Rmat, True  ' economy=True: Q(mxk), R(kxk)
     Dim yCol() As Double: ReDim yCol(1 To n, 1 To 1)
-    For i = 1 To n: yCol(i, 1) = y(lb + i - 1): Next i
+    For i = 1 To n: yCol(i, 1) = y(ylb + i - 1): Next i
     ' 计算 Q^T * y
     Dim QtY() As Double: QtY = MatrixMultiply(MatrixTranspose(Qmat), yCol)
     ' 回代求解 R * beta = QtY (R 是 k×k 上三角)

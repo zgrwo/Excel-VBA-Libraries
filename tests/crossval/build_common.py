@@ -67,6 +67,9 @@ except ImportError:
 # =============================================================================
 # Test case definition types
 # =============================================================================
+
+# Set by CrossValRunner.print_summary(); consumed by run_all_crossval.py
+LAST_SUMMARY: Dict[str, int] = {}
 # Each test case is a dict:
 #   name       str     — unique test name within the module
 #   func       str     — VBA function name (e.g., "ArraySort")
@@ -144,7 +147,11 @@ class CrossValRunner:
             teardown(excel, wb)
 
     def print_summary(self) -> Tuple[int, int]:
-        """Print a summary report and return (pass_count, fail_count)."""
+        """Print a summary report and return (pass_count, fail_count).
+
+        Effective pass rate EXCLUDES skipped cases: ``passed / (passed + failed)``.
+        A module whose cases are all skipped reports ``NO RUNS`` instead of 100%.
+        """
         passed = sum(1 for r in self.results if r[2] == "PASS")
         failed = sum(1 for r in self.results if r[2] == "FAIL")
         skipped = sum(1 for r in self.results if r[2] == "SKIP")
@@ -158,10 +165,17 @@ class CrossValRunner:
         print(f"  FAIL   : {failed}")
         if skipped:
             print(f"  SKIP   : {skipped}")
-        if total > 0:
-            rate = 100.0 * (passed + skipped) / total
-            print(f"  Rate   : {rate:.1f}%")
+        executed = passed + failed
+        if executed > 0:
+            rate = 100.0 * passed / executed
+            print(f"  Rate   : {rate:.1f}%  (effective, excl. skip)")
+        elif skipped > 0:
+            print("  Rate   : NO RUNS (all cases skipped)")
         print(f"{'=' * 60}")
+
+        LAST_SUMMARY.update({
+            "total": total, "passed": passed, "failed": failed, "skipped": skipped,
+        })
 
         if failed > 0:
             print(f"\n  Failures ({failed}):")
@@ -220,6 +234,12 @@ class CrossValRunner:
         except Exception as exc:
             if tc.get("expect_error", False):
                 needle = tc.get("expect_err_contains")
+                if needle is None and not tc.get("expect_any_error", False):
+                    self.results.append((self.module_name, tc["name"], "FAIL",
+                                         "expect_error requires expect_err_contains "
+                                         "or expect_any_error: True"))
+                    print(f"  FAIL  {label} — expect_error without error fingerprint")
+                    return
                 if needle is None or needle in str(exc):
                     self.results.append((self.module_name, tc["name"], "PASS", ""))
                     print(f"  PASS  {label} — raised as expected")
@@ -432,11 +452,23 @@ class CrossValRunner:
         else:
             py_val = np.asarray([py_val], dtype=float)
 
-        # Reshape for broadcasting comparison
-        if py_val.ndim == 1 and vba_arr.ndim == 2 and vba_arr.shape[1] == 1:
+        # Normalize only the documented vector-orientation tolerance:
+        # VBA (n,1) column / (1,n) row vs Python 1D vector of the same length.
+        if py_val.ndim == 1 and vba_arr.ndim == 2 and vba_arr.shape[1] == 1 \
+                and vba_arr.shape[0] == py_val.shape[0]:
             py_val = py_val.reshape(-1, 1)
-        elif py_val.ndim == 2 and vba_arr.ndim == 1:
-            vba_arr = vba_arr.reshape(-1, 1)
+        elif py_val.ndim == 1 and vba_arr.ndim == 2 and vba_arr.shape[0] == 1 \
+                and vba_arr.shape[1] == py_val.shape[0]:
+            vba_arr = vba_arr.reshape(-1)
+        elif py_val.ndim == 2 and vba_arr.ndim == 1 and py_val.size == vba_arr.size:
+            py_val = py_val.reshape(vba_arr.shape)
+
+        # Shape must match exactly — no NumPy broadcasting (false PASS guard)
+        if vba_arr.shape != py_val.shape:
+            self.results.append((self.module_name, label, "FAIL",
+                                 f"shape mismatch: VBA={vba_arr.shape} PY={py_val.shape}"))
+            print(f"  FAIL  {label} — shape mismatch: VBA={vba_arr.shape} PY={py_val.shape}")
+            return
 
         # Handle empty arrays: np.max on empty raises ValueError
         if vba_arr.size == 0 and py_val.size == 0:
@@ -485,7 +517,17 @@ class CrossValRunner:
             print(f"  FAIL  {label} — {detail}")
 
     def _compare_string(self, label, vba_result, py_val):
-        """Compare string results."""
+        """Compare string results. None (Empty/Null) is distinct from "" but
+        None==None (both sides legitimately empty) is a PASS."""
+        if vba_result is None and py_val is None:
+            self.results.append((self.module_name, label, "PASS", ""))
+            print(f"  PASS  {label}  (both Empty/None)")
+            return
+        if vba_result is None and py_val is not None:
+            self.results.append((self.module_name, label, "FAIL",
+                                 f"VBA returned Empty/Null, expected {py_val!r}"))
+            print(f"  FAIL  {label} — VBA Empty/Null, expected {py_val!r}")
+            return
         vba_str = str(vba_result).strip() if vba_result is not None else ""
         py_str = str(py_val).strip()
         ok = vba_str == py_str
@@ -510,26 +552,24 @@ class CrossValRunner:
 # =============================================================================
 
 def _com_to_scalar(vba_result: Any) -> Optional[float]:
-    """Extract a single float from a COM return value."""
+    """Extract a single float from a COM return value.
+
+    Returns None for multi-element results: a scalar-expected call that
+    returns an array must FAIL, not silently compare its first element.
+    """
     if vba_result is None:
         return None
     if isinstance(vba_result, (int, float)):
         return float(vba_result)
     if isinstance(vba_result, (tuple, list)):
-        if len(vba_result) == 0:
+        if len(vba_result) != 1:
             return None
-        if len(vba_result) == 1:
-            inner = vba_result[0]
-            if isinstance(inner, (tuple, list)):
-                if len(inner) == 1:
-                    return float(inner[0])
-                elif len(inner) > 0:
-                    return float(inner[0])
-            return float(inner)
-        # First element of first row
-        if isinstance(vba_result[0], (tuple, list)):
-            return float(vba_result[0][0])
-        return float(vba_result[0])
+        inner = vba_result[0]
+        if isinstance(inner, (tuple, list)):
+            if len(inner) != 1:
+                return None
+            return float(inner[0])
+        return float(inner)
     try:
         return float(vba_result)
     except (ValueError, TypeError):

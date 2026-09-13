@@ -180,7 +180,7 @@ TEST_CASES = [
     {"name": "ConvertStandard_ambient", "func": "ConvertStandard",
      "args": lambda: (0.024, 101325.0, 298.15, 28.97),
      "py_ref": lambda a: _py_convert_standard(a[0], a[1], a[2], a[3]),
-     "result_type": "scalar", "tol": 1e-4},
+     "result_type": "array", "tol": 1e-4},
 
     # ---- ConvertMass ----
     {"name": "ConvertMass_g_to_kg", "func": "ConvertMass",
@@ -404,9 +404,11 @@ TEST_CASES = [
 
 
 def _py_convert_standard(V, P, T, MW):
-    R = 8.314; T_std = 273.15; P_std = 101325.0
+    R = 8.314462618; T_std = 273.15; P_std = 101325.0
     n = (P * V) / (R * T)
-    return (n * R * T_std) / P_std
+    std_volume = (n * R * T_std) / P_std
+    std_weight = n * MW * 0.001
+    return [std_volume, std_weight]
 
 def _py_compress_factor(P, T, Tc, Pc, omega):
     R = 8.314; Tr = T / Tc; Pr = P / Pc

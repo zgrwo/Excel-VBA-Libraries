@@ -484,7 +484,7 @@ Public Function TextJoin( _
     ByVal delimiter As String, _
     ParamArray args() As Variant) As String
 
-    Dim i As Long, j As Long
+    Dim i As Long, j As Long, r As Long, c As Long
     Dim item As Variant
     Dim first As Boolean
     Dim parts() As String
@@ -494,36 +494,30 @@ Public Function TextJoin( _
     ReDim parts(0 To cap - 1) As String
     first = True
     For i = LBound(args) To UBound(args)
-        If IsArray(args(i)) Then
-            For j = LBound(args(i)) To UBound(args(i))
-                If IsError(args(i)(j)) Or IsNull(args(i)(j)) Or IsEmpty(args(i)(j)) Then
-                    ' 跳过错误值、Null 和空值
-                Else
-                    If pIdx + 2 > cap Then
-                        cap = cap * 2
-                        ReDim Preserve parts(0 To cap - 1)
-                    End If
-                    If Not first Then
-                        parts(pIdx) = delimiter: pIdx = pIdx + 1
-                    End If
-                    parts(pIdx) = CStr(args(i)(j)): pIdx = pIdx + 1
-                    first = False
-                End If
-            Next j
-        Else
-            If IsError(args(i)) Or IsNull(args(i)) Or IsEmpty(args(i)) Then
-                ' 跳过
+        item = args(i)
+        ' Range → Value (dual-path: UDF receives Range objects)
+        If IsObject(item) Then
+            If TypeOf item Is Range Then item = item.Value
+        End If
+        If IsArray(item) Then
+            Dim d2 As Long
+            Err.Clear: On Error Resume Next
+            d2 = UBound(item, 2)
+            Dim is2D As Boolean: is2D = (Err.Number = 0)
+            On Error GoTo 0
+            If is2D Then
+                For r = LBound(item, 1) To UBound(item, 1)
+                    For c = LBound(item, 2) To UBound(item, 2)
+                        TJAdd parts, pIdx, cap, first, delimiter, item(r, c)
+                    Next c
+                Next r
             Else
-                If pIdx + 2 > cap Then
-                    cap = cap * 2
-                    ReDim Preserve parts(0 To cap - 1)
-                End If
-                If Not first Then
-                    parts(pIdx) = delimiter: pIdx = pIdx + 1
-                End If
-                parts(pIdx) = CStr(args(i)): pIdx = pIdx + 1
-                first = False
+                For j = LBound(item) To UBound(item)
+                    TJAdd parts, pIdx, cap, first, delimiter, item(j)
+                Next j
             End If
+        Else
+            TJAdd parts, pIdx, cap, first, delimiter, item
         End If
     Next i
     If pIdx > 0 Then
@@ -531,6 +525,21 @@ Public Function TextJoin( _
         TextJoin = Join(parts, "")
     End If
 End Function
+
+' TJAdd — TextJoin 累加器 (跳过 Error/Null/Empty, 自动扩容)
+Private Sub TJAdd(ByRef parts() As String, ByRef pIdx As Long, ByRef cap As Long, _
+                  ByRef first As Boolean, ByVal delimiter As String, ByVal v As Variant)
+    If IsError(v) Or IsNull(v) Or IsEmpty(v) Then Exit Sub
+    If pIdx + 2 > cap Then
+        cap = cap * 2
+        ReDim Preserve parts(0 To cap - 1)
+    End If
+    If Not first Then
+        parts(pIdx) = delimiter: pIdx = pIdx + 1
+    End If
+    parts(pIdx) = CStr(v): pIdx = pIdx + 1
+    first = False
+End Sub
 
 '=============================================================================
 ' NthWord — 提取第 n 个词
@@ -734,8 +743,9 @@ Public Function RemoveChars( _
     End If
 
     ' 尝试创建 Dictionary，失败则使用纯 VBA 回退
+    ' BinaryCompare: 与回退路径的 InStr(vbBinaryCompare) 语义一致 (大小写敏感)
     On Error Resume Next
-    Set charDict = DP.Create()
+    Set charDict = DP.Create(vbBinaryCompare)
     On Error GoTo 0
 
     Dim parts() As String
@@ -787,8 +797,9 @@ Public Function KeepChars( _
     End If
 
     ' 尝试创建 Dictionary，失败则使用纯 VBA 回退
+    ' BinaryCompare: 与回退路径的 InStr(vbBinaryCompare) 语义一致 (大小写敏感)
     On Error Resume Next
-    Set charDict = DP.Create()
+    Set charDict = DP.Create(vbBinaryCompare)
     On Error GoTo 0
 
     Dim parts() As String
@@ -1643,55 +1654,63 @@ Public Function HTMLEncode(ByVal text As String) As String
 End Function
 
 Public Function HTMLDecode(ByVal text As String) As String
-    ' Numeric entities first: prevents double-decoding of &amp;#NNN; sequences.
-    ' Per HTML spec, entity-decoded output must not be re-scanned for further entities.
-    ' If named entities were processed first, &amp;#65; → &#65; → A (wrong).
-    ' With numeric first, &amp;#65; stays as &#65; because &amp; hasn't been decoded yet.
+    ' Single-pass decode: entity-decoded output is never re-scanned for further
+    ' entities (RFC 1866 semantics). Prevents &#38;lt; → &lt; → < double decode.
+    Dim i As Long, n As Long, semiPos As Long
+    Dim entity As String, body As String, code As Long
+    Dim parts() As String, pIdx As Long
+    Dim sp As Long
 
-    ' 解析数字实体 &#nnn; &#xHH;
-    Dim pos As Long, endPos As Long
-    Dim entity As String, code As Long
-
-    pos = InStr(text, "&#")
-    Do While pos > 0
-        code = 0
-        endPos = InStr(pos + 2, text, ";")
-        If endPos > 0 Then
-            entity = Mid$(text, pos + 2, endPos - pos - 2)
-            Err.Clear
-            On Error Resume Next
-            If Left$(entity, 1) = "x" Or Left$(entity, 1) = "X" Then
-                If IsHexString(Mid$(entity, 2)) Then
-                    code = CLng("&H" & Mid$(entity, 2))
+    n = Len(text)
+    If n = 0 Then HTMLDecode = "": Exit Function
+    ReDim parts(0 To n - 1)
+    pIdx = 0
+    i = 1
+    Do While i <= n
+        If Mid$(text, i, 1) <> "&" Then
+            parts(pIdx) = Mid$(text, i, 1): pIdx = pIdx + 1
+            i = i + 1
+        Else
+            semiPos = InStr(i + 1, text, ";")
+            entity = ""
+            If semiPos > 0 Then entity = Mid$(text, i + 1, semiPos - i - 1)
+            code = 0
+            If Len(entity) > 0 And Left$(entity, 1) = "#" Then
+                body = Mid$(entity, 2)
+                If Len(body) > 1 And (Left$(body, 1) = "x" Or Left$(body, 1) = "X") Then
+                    If Len(body) <= 7 And IsHexString(Mid$(body, 2)) Then
+                        code = CLng("&H" & Mid$(body, 2))
+                    End If
+                ElseIf Len(body) <= 7 And IsNumeric(body) Then
+                    code = CLng(body)
                 End If
-            ElseIf IsNumeric(entity) Then
-                code = CLng(entity)
-            End If
-            On Error GoTo 0
-
-            If code > 0 Then
-                If code <= 65535 Then
-                    text = Left$(text, pos - 1) & ChrW$(code) & Mid$(text, endPos + 1)
-                ElseIf code <= &H10FFFF Then
-                    ' 代理对编码 (U+10000 - U+10FFFF)
-                    code = code - &H10000
-                    text = Left$(text, pos - 1) & _
-                           ChrW$(&HD800& + (code \ &H400&)) & _
-                           ChrW$(&HDC00& + (code And &H3FF&)) & _
-                           Mid$(text, endPos + 1)
+                If code > 0 And code <= &H10FFFF Then
+                    If code <= 65535 Then
+                        parts(pIdx) = ChrW$(code): pIdx = pIdx + 1
+                    Else
+                        sp = code - &H10000
+                        parts(pIdx) = ChrW$(&HD800& + (sp \ &H400&)): pIdx = pIdx + 1
+                        parts(pIdx) = ChrW$(&HDC00& + (sp And &H3FF&)): pIdx = pIdx + 1
+                    End If
+                    i = semiPos + 1
+                Else
+                    parts(pIdx) = "&": pIdx = pIdx + 1
+                    i = i + 1
                 End If
+            Else
+                Select Case LCase$(entity)
+                    Case "quot": parts(pIdx) = """": pIdx = pIdx + 1: i = semiPos + 1
+                    Case "lt": parts(pIdx) = "<": pIdx = pIdx + 1: i = semiPos + 1
+                    Case "gt": parts(pIdx) = ">": pIdx = pIdx + 1: i = semiPos + 1
+                    Case "amp": parts(pIdx) = "&": pIdx = pIdx + 1: i = semiPos + 1
+                    Case Else
+                        parts(pIdx) = "&": pIdx = pIdx + 1
+                        i = i + 1
+                End Select
             End If
         End If
-        pos = InStr(pos + 1, text, "&#")
     Loop
-
-    ' 解码命名实体。&amp; 必须最后处理，避免 &amp;lt; → &lt; → <
-    text = Replace(text, "&quot;", """")
-    text = Replace(text, "&lt;", "<")
-    text = Replace(text, "&gt;", ">")
-    text = Replace(text, "&amp;", "&")
-
-    HTMLDecode = text
+    HTMLDecode = Join(parts, "")
 End Function
 
 '=============================================================================

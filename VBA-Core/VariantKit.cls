@@ -471,12 +471,28 @@ Public Function ValuesEqual(ByVal a As Variant, ByVal b As Variant) As Boolean
         ValuesEqual = (CStr(a) = CStr(b)): Exit Function
     End If
     If IsError(a) Or IsError(b) Then Exit Function
+    ' Objects / arrays: type-aware SafeKey equality (Array(1) vs Array(1) = True;
+    ' Array vs scalar = False). Prevents CStr(Array) Error 13 / CStr(Object) Error 450.
+    If IsArray(a) Or IsArray(b) Or IsObject(a) Or IsObject(b) Then
+        ValuesEqual = (SafeKey(a) = SafeKey(b)): Exit Function
+    End If
     If VarType(a) = vbBoolean Or VarType(b) = vbBoolean Then
         If VarType(a) <> VarType(b) Then Exit Function
         ValuesEqual = (CBool(a) = CBool(b)): Exit Function
     End If
     If IsNumeric(a) And IsNumeric(b) Then
-        ValuesEqual = (Abs(CDbl(a) - CDbl(b)) < 1E-12): Exit Function
+        ' Scale-aware relative tolerance; ratio form avoids intermediate overflow
+        ' for extreme magnitudes (e.g. 9E307 vs -9E307).
+        Dim numA As Double, numB As Double, numScale As Double
+        numA = CDbl(a): numB = CDbl(b)
+        numScale = Abs(numA)
+        If Abs(numB) > numScale Then numScale = Abs(numB)
+        If numScale = 0# Then
+            ValuesEqual = True
+        Else
+            ValuesEqual = (Abs(numA / numScale - numB / numScale) < 1E-12)
+        End If
+        Exit Function
     End If
     ' 日期分支: vbDate 值已在上方 IsNumeric 路径按数值容差比较 (IsNumeric(Date)=True);
     ' 本分支仅处理日期样式的字符串 (如 "2024-01-01", IsNumeric 为 False).
@@ -538,7 +554,7 @@ Public Function Compare(ByVal a As Variant, ByVal b As Variant) As Long
             Compare = 0
         End If
     Else
-        ' Arrays: compare by dimensions and element count, then element-by-element
+        ' Arrays: compare by dimensions, then by element count per dimension
         If IsArray(a) And IsArray(b) Then
             Dim dimsA As Long: dimsA = ArrayDims(a)
             Dim dimsB As Long: dimsB = ArrayDims(b)
@@ -546,17 +562,30 @@ Public Function Compare(ByVal a As Variant, ByVal b As Variant) As Long
                 If dimsA < dimsB Then Compare = -1 Else Compare = 1
                 Exit Function
             End If
+            If dimsA = 0 Then Compare = 0: Exit Function  ' both unallocated
             Dim nA As Long: nA = UBound(a, 1) - LBound(a, 1) + 1
             Dim nB As Long: nB = UBound(b, 1) - LBound(b, 1) + 1
             If nA <> nB Then
                 If nA < nB Then Compare = -1 Else Compare = 1
                 Exit Function
             End If
+            If dimsA = 2 Then
+                Dim nA2 As Long: nA2 = UBound(a, 2) - LBound(a, 2) + 1
+                Dim nB2 As Long: nB2 = UBound(b, 2) - LBound(b, 2) + 1
+                If nA2 <> nB2 Then
+                    If nA2 < nB2 Then Compare = -1 Else Compare = 1
+                    Exit Function
+                End If
+            End If
             ' Arrays of same dims/size are equal for ordering
             Compare = 0: Exit Function
         End If
         If IsArray(a) Then Compare = 1: Exit Function
         If IsArray(b) Then Compare = -1: Exit Function
+        ' Mixed numeric/non-numeric: numeric ranks before text. This yields a
+        ' transitive order (pairwise IsNumeric checks alone do not).
+        If IsNumeric(a) Then Compare = -1: Exit Function
+        If IsNumeric(b) Then Compare = 1: Exit Function
         Compare = StrComp(SafeStr(a), SafeStr(b), vbTextCompare)
     End If
 End Function
@@ -585,10 +614,17 @@ Public Function FilterPasses(ByVal element As Variant, ByVal matchValue As Varia
     Static regex As Object
     Dim s As String, sCrit As String
 
-    ' Fast-reject: Error/Null/Object/Array cannot be compared by value operators
+    ' Fast-reject: Error/Null/Object/Array cannot be compared by value operators.
+    ' isblank/isnotblank are handled first; Null is defined as blank.
     Select Case LCase$(op)
-        Case "isblank":  FilterPasses = (Len(Trim(CStr(element))) = 0): Exit Function
-        Case "isnotblank": FilterPasses = (Len(Trim(CStr(element))) > 0): Exit Function
+        Case "isblank"
+            If IsNull(element) Then FilterPasses = True: Exit Function
+            If IsError(element) Or IsObject(element) Or IsArray(element) Then Exit Function
+            FilterPasses = (Len(Trim(CStr(element))) = 0): Exit Function
+        Case "isnotblank"
+            If IsNull(element) Then FilterPasses = False: Exit Function
+            If IsError(element) Or IsObject(element) Or IsArray(element) Then Exit Function
+            FilterPasses = (Len(Trim(CStr(element))) > 0): Exit Function
     End Select
 
     If IsError(element) Or IsNull(element) Or IsObject(element) Or IsArray(element) Then Exit Function
@@ -740,6 +776,25 @@ Public Sub Test_VariantKit()
     If Not (ValuesEqual("abc", "abc") = True) Then Err.Raise 5
     If Not (ValuesEqual("abc", "ABC") = False) Then Err.Raise 5
 
+    ' Array/Object equality (2026-09-13 回归: 此前 CStr(Array) 抛 Error 13)
+    If Not (ValuesEqual(Array(1, 2), Array(1, 2)) = True) Then Err.Raise 5
+    If Not (ValuesEqual(Array(1), Array(2)) = False) Then Err.Raise 5
+    If Not (ValuesEqual(Array(1), 1) = False) Then Err.Raise 5
+
+    ' Scale-aware numeric epsilon (2026-09-13 回归: 0 vs 1E-13 不得判等)
+    If Not (ValuesEqual(0#, 0.0000000000001) = False) Then Err.Raise 5
+    If Not (ValuesEqual(9E+307, -9E+307) = False) Then Err.Raise 5
+
+    ' Compare — mixed numeric/text must be transitive (numeric ranks first)
+    If Not (Compare("9", "10") = -1) Then Err.Raise 5
+    If Not (Compare("10", "2x") = -1) Then Err.Raise 5
+    If Not (Compare("9", "2x") = -1) Then Err.Raise 5
+
+    ' FilterPasses — Null is blank; no CStr(Null) crash (2026-09-13 回归)
+    If Not (FilterPasses(Null, "", "isblank") = True) Then Err.Raise 5
+    If Not (FilterPasses(Null, "", "isnotblank") = False) Then Err.Raise 5
+    If Not (FilterPasses("", "", "isblank") = True) Then Err.Raise 5
+
     '=====================================================================
     ' IsEmptyArray
     '=====================================================================
@@ -801,7 +856,7 @@ Public Sub Test_VariantKit()
     If Not (UBound(result) = 2) Then Err.Raise 5
     If Not (result(0) = 1) Then Err.Raise 5
 
-    If failCount > 0 Then Err.Raise 5, , "VariantKit: " & failCount & " assertion(s) failed"
+    If failCount > 0 Then On Error GoTo 0: Err.Raise 5, , "VariantKit: " & failCount & " assertion(s) failed"
     Exit Sub
 ErrHandler:
     If Err.Number = 5 Then

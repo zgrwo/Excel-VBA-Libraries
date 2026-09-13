@@ -143,21 +143,30 @@ def _build_runall(excel, wb, module_paths: list[str]) -> None:
                     n_skipped += 1
                     continue
                 is_cls = mp.endswith(".cls")
+                label = f"Test_{mod_name}"
                 if is_cls:
-                    call_line = (
-                        f"    On Error Resume Next: "
-                        f"Dim o_{mod_name} As New {mod_name}: "
-                        f"o_{mod_name}.{test_name}: "
-                        f"On Error GoTo 0"
+                    call_stmt = (
+                        f"        Dim o_{mod_name} As New {mod_name}\n"
+                        f"        o_{mod_name}.{test_name}"
                     )
                 else:
-                    call_line = (
-                        f"    On Error Resume Next: "
-                        f"Call {test_name}: "
-                        f"On Error GoTo 0"
-                    )
-                code.InsertLines(insert_line, call_line)
-                insert_line += 1
+                    call_stmt = f"        {test_name}"
+                # Guarded call: failures are recorded as FAIL rows via TestRunner.Assert
+                # (never silently swallowed), successes as PASS rows.
+                block_lines = (
+                    f"\n    On Error GoTo EH_{test_name}\n"
+                    f"{call_stmt}\n"
+                    f"    Assert \"{label}\", True\n"
+                    f"    GoTo DONE_{test_name}\n"
+                    f"EH_{test_name}:\n"
+                    f"    Assert \"{label}\", False, CStr(Err.Number) & \": \" & Err.Description\n"
+                    f"    Err.Clear\n"
+                    f"DONE_{test_name}:\n"
+                    f"    On Error GoTo 0\n"
+                ).split("\n")
+                block_text = "\r\n".join(block_lines)
+                code.InsertLines(insert_line, block_text)
+                insert_line += len(block_lines)
                 n_added += 1
 
             if n_skipped > 0:
@@ -167,10 +176,12 @@ def _build_runall(excel, wb, module_paths: list[str]) -> None:
 
 
 def _find_runall_insertion_line(code) -> int:
-    """Return the line number *after* the ``Public Sub RunAllTests()`` header.
+    """Return the line number of the ``End Sub`` that closes RunAllTests.
 
-    The header may span multiple lines (line-continuation with ``_``).
-    Returns -1 if the header cannot be located.
+    Test calls must be injected at the END of the body: the driver first
+    clears/initialises the TestResults sheet, so injecting right after the
+    procedure header would have assertions wiped by ``ws.Cells.Clear``.
+    Returns -1 if RunAllTests cannot be located.
     """
     total = code.CountOfLines
     i = 1
@@ -182,7 +193,13 @@ def _find_runall_insertion_line(code) -> int:
             while i <= total and stripped.endswith("_"):
                 i += 1
                 stripped = code.Lines(i, 1).strip()
-            return i + 1  # insert after the header
+            # Scan forward to the matching End Sub
+            j = i + 1
+            while j <= total:
+                if code.Lines(j, 1).strip() == "End Sub":
+                    return j
+                j += 1
+            return -1
         i += 1
     return -1
 
@@ -283,10 +300,10 @@ def _run_unit_tests(target: str | None = None) -> int:
 
         if failed == 0 and passed == 0:
             print(
-                "  NOTE: Zero failures recorded — all assertions passed.\n"
-                "        Tests use 'If Not(cond) Then Err.Raise 5'; errors are\n"
-                "        caught by the runner. PASS = no Err.Raise triggered.\n"
+                "  ERROR: No test rows recorded — injection or runner failure.\n"
+                "         (Injected calls must always write a PASS/FAIL row.)"
             )
+            return 1
 
         return 0 if failed == 0 else 1
 

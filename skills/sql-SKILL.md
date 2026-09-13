@@ -250,6 +250,7 @@ sql = "SELECT * FROM [Data$] WHERE Name = '" & userInput & "'"
 1. 所有来自单元格的用户输入在拼入 SQL 前通过 `SqlEscapeString()` 转义
 2. 避免在 UDF 公式中直接使用 `&` 拼接单元格引用到 SQL 字符串中而不加转义
 3. 对于 `IN` 子句中的值列表，转义每个元素
+4. LIKE 模式使用 `forLike:=True`：ACE/Jet 用方括号字符类转义（`%`→`[%]`、`_`→`[_]`、`[`→`[[]`），反斜杠**不是** ACE 的转义符（实测 `LIKE '100\%'` 匹配不到 `100%`，`LIKE 'a\[b'` 直接报 5003071 无效模式串）
 
 ## 11. Related Skills
 

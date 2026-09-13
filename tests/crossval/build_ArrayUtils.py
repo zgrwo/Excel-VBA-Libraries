@@ -1339,6 +1339,19 @@ TEST_CASES = [
 # =============================================================================
 # Main entry point
 # =============================================================================
+# 2026-09-13 回归: 标量按单元素处理、空数组抽样
+TEST_CASES += [
+    {"name": "ArraySum_scalar", "func": "ArraySum",
+     "args": lambda: (5,), "py_ref": lambda a: 5.0, "tol": 0.0},
+    {"name": "ArrayMin_scalar", "func": "ArrayMin",
+     "args": lambda: (5,), "py_ref": lambda a: 5.0, "tol": 0.0},
+    {"name": "ArrayFind_scalar", "func": "ArrayFind",
+     "args": lambda: (7, 7), "py_ref": lambda a: 0.0, "tol": 0.0},
+    {"name": "ArraySample_empty", "func": "ArraySample",
+     "args": lambda: ([], 3), "py_ref": lambda a: [], "result_type": "array"},
+]
+
+
 def main() -> int:
     runner = CrossValRunner("ArrayUtils", MODULE_PATHS)
     runner.run_all(TEST_CASES)

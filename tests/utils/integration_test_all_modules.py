@@ -165,21 +165,25 @@ def main():
 
         # ===== 1. RegressUtils =====
         print("\n=== 1. RegressUtils ===")
-        rng_X = t._range(X)
-        rng_y = t._range(y.reshape(-1, 1))
+        # Write X and y side by side in ONE call — _range() clears UsedRange,
+        # so calling it twice would alias rng_X onto the y data.
+        combined = np.hstack([X, y.reshape(-1, 1)])
+        t._range(combined)
+        rng_X = ws.Range(ws.Cells(1, 1), ws.Cells(n, p))
+        rng_y = ws.Range(ws.Cells(1, p + 1), ws.Cells(n, p + 1))
         result = t.call("RegressUtils.FitOLS", rng_X, rng_y)
         vba_r2 = float(result.Item("r_squared"))
         py_coef = np.linalg.lstsq(X, y, rcond=None)[0]
         py_r2 = 1 - np.sum((y - X @ py_coef)**2) / np.sum((y - np.mean(y))**2)
-        # Known: VBA FitOLS via Range path gives R^2=1.0 (overfit), Python ~0.93
-        # Use loose tolerance (0.1) to detect regression while accepting known gap
-        t.ok("RegressUtils", "FitOLS_R2", vba_r2, py_r2, tol=0.1)
+        t.ok("RegressUtils", "FitOLS_R2", vba_r2, py_r2, tol=1e-6)
+        vba_coef = np.array([float(c) for c in result.Item("coefficients")])
+        t.ok_arr("RegressUtils", "FitOLS_coef", vba_coef, py_coef, tol=1e-6)
 
-        # Header-based FactorImportance
+        # Header-based FactorImportance (headers must be written AFTER _range clears)
+        t._range(full, row=2)
         hdrs = ["Temp","Humidity","Wind","Price","Cost","Qty","Rating","NumX1","NumX2","NumX3","Response"]
         for ci, h in enumerate(hdrs, 1):
             ws.Cells(1, ci).Value = h
-        t._range(full, row=2)
         rng_hdr = ws.Range(ws.Cells(1, 1), ws.Cells(n + 1, p + 1))
         fi = t.call("RegressUtils.FactorImportance", rng_hdr, list(range(1, p+1)), p+1, 5)
         t.info("RegressUtils", "FactorImportance", f"{len(fi)} rows returned")

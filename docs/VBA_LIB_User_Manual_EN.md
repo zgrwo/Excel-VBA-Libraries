@@ -2506,7 +2506,7 @@ Central tendency, dispersion, shape, ranking, correlation, data transformation, 
 | [`Max`](#max) | `(data, [colIndex])` | Maximum value (VBA-only) | Variant (Double) |
 | [`Median`](#median) | `(data, [colIndex])` | Median | Variant (Double) |
 | [`Min`](#min) | `(data, [colIndex])` | Minimum value (VBA-only) | Variant (Double) |
-| [`MinMax`](#minmax) | `(data, [outMin], [outMax])` | Return min and max simultaneously | Variant Array |
+| [`MinMax`](#minmax) | `(data, [outMin], [outMax], [colIndex])` | Return min and max simultaneously | Variant Array |
 | [`Mode`](#mode) | `(data, [colIndex])` | Mode (Returns #N/A when no unique mode) | Variant (Double) |
 | [`GeometricMean`](#geometricmean) | `(data, [colIndex])` | Geometric mean (log-space for overflow safety) | Variant (Double) |
 | [`HarmonicMean`](#harmonicmean) | `(data, [colIndex])` | Harmonic mean | Variant (Double) |
@@ -2637,8 +2637,10 @@ mm = MinMax(Range("A1:A100"))          ' -> Array(min, max)
 =UDF_STAT_MEAN(data, [colIndex])
 =UDF_STAT_MEDIAN(data, [colIndex])
 =UDF_STAT_MODE(data, [colIndex])
-=UDF_STAT_MINMAX(data, [colIndex])
+=UDF_STAT_MINMAX(data, [outMin], [outMax], [colIndex])
 ```
+
+> `outMin`/`outMax` are reserved parameters (ByVal, do not affect the result); select a column with the 4th argument `colIndex` (default 1).
 
 <a id="stddev"></a>
 <a id="stddevp"></a>
@@ -3481,7 +3483,7 @@ String extraction, encoding conversion, format validation, edit distance, random
 <a id="keepchars"></a>
 #### RemoveChars / KeepChars
 
-RemoveChars removes all characters from the string that are in the specified character set; KeepChars preserves only characters in the specified character set.
+RemoveChars removes all characters from the string that are in the specified character set; KeepChars preserves only characters in the specified character set. Both are case-sensitive (`RemoveChars("aA","a")` → `"A"`).
 
 **VBA Usage**
 ```vb
@@ -4217,7 +4219,7 @@ Pure VBA recursive-descent JSON parser with zero external dependencies. Supports
 |------|------|------|--------|
 | [`JsonParse`](#jsonparse) | `(jsonText)` | Parse JSON string **VBA-only** | Variant (Dictionary/Array/Scalar) |
 | [`JsonGet`](#jsonget) | `(json, path)` | Extract by pathvalue **VBA-only** | Variant |
-| [`JsonToRange`](#jsontorange) | `(json, destCell, [headers])` | JSON object array output to worksheet **Sub** | — |
+| [`JsonToRange`](#jsontorange) | `(json, destCell)` | JSON object array output to worksheet **Sub** | — |
 | [`JsonGetKeys`](#jsongetkeys) | `(json)` | List all keys of an object | String() |
 | [`JsonIsValid`](#jsonisvalid) | `(jsonText)` | Validate JSON validity (no errors thrown) | Boolean |
 | [`JsonStringify`](#jsonstringify) | `(value)` | VBA Variant → JSON string **VBA-only** | String |
@@ -4350,7 +4352,7 @@ Output a JSON object array to a worksheet, auto-generating table headers.
 
 **VBA Usage**
 ```vb
-JsonToRange(jsonText, destCell, [includeHeaders])
+JsonToRange(jsonText, destCell)
 ```
 
 ```vb
@@ -5544,7 +5546,7 @@ mw = MolecularWeight("CuSO4·5H2O")    ' → 249.69  (supports · and + hydrate 
 
 #### DilutionSolve
 
-C1 * V1 = C2 * V2 solver. Pass three of the four parameters; pass 0 or omit the parameter to solve for. Returns the solved value.
+C1 * V1 = C2 * V2 solver. Pass three of the four parameters; pass Empty (or leave blank/omit) for the parameter to solve for (0 is a valid value, not an unknown marker). Returns the solved value.
 
 **VBA Usage**
 ```vb
@@ -5552,8 +5554,8 @@ DilutionSolve(c1, v1, c2, v2) As Double
 ```
 
 ```vb
-v2_needed = DilutionSolve(10, 100, 5, 0)  ' → 200
-c2_final = DilutionSolve(10, 50, 0, 200)  ' → 2.5
+v2_needed = DilutionSolve(10, 100, 5, Empty)  ' → 200
+c2_final = DilutionSolve(10, 50, Empty, 200)  ' → 2.5
 ```
 
 **UDF Usage**
@@ -5587,7 +5589,7 @@ m = MolesToMass(2, 18.015)     ' → 36.03 (g H2O)
 
 #### Density
 
-Density solver: calculate the third quantity from any two known quantities among m/V/rho.
+Density solver: calculate the third quantity from any two known quantities among m/V/rho; pass Empty (or leave blank/omit) for the unknown.
 
 ```vb
 Density(m, v, rho) As Double
@@ -5596,7 +5598,7 @@ Density(m, v, rho) As Double
 Unit convention: mass in g, volume in mL, rho in g/mL.
 
 ```vb
-v = Density(100, 0, 2.5)  ' → 40 (volume = mass/density)
+v = Density(100, Empty, 2.5)  ' → 40 (volume = mass/density)
 ```
 
 **UDF Usage**
@@ -5666,30 +5668,29 @@ v = ConvertTemperature(100, "C", "F")     ' → 212
 
 #### ConvertStandard
 
-Convert gas volume at arbitrary (P, T) conditions to volume and mass at standard state (0°C, 1 atm). Returns a 2D array with V_std and mass.
+Convert gas volume at arbitrary (P, T) conditions to volume and mass at standard state (0°C, 101325 Pa). Returns a 1D array: result(0)=standard volume (m³), result(1)=standard mass (kg).
 
 **VBA Usage**
 ```vb
-ConvertStandard(v, p, T, MW) As Variant(,)
+ConvertStandard(volume_m3, pressure_Pa, temperature_K, molWeight) As Variant
 ```
 
 | Parameter | Type | Description |
 |------|------|------|
-| v | Double | Volume (L) |
-| p | Double | Pressure (kPa) |
-| T | Double | Temperature (°C) |
-| MW | Double | Molar mass (g/mol) |
+| volume_m3 | Double | Volume (m³) |
+| pressure_Pa | Double | Pressure (Pa) |
+| temperature_K | Double | Temperature (K) |
+| molWeight | Double | Molar mass (g/mol) |
 
 ```vb
 Dim result As Variant
-result = ConvertStandard(10, 202.65, 25, 28.01)
-' result(0,0)="Std Volume(L)", result(0,1)="Std Mass(g)"
-' result(1,0)=18.61, result(1,1)=23.27
+result = ConvertStandard(0.01, 202650, 298.15, 28.01)
+' result(0) ≈ 0.01833 (m³), result(1) ≈ 0.02290 (kg)
 ```
 
 **UDF Usage**
 ```
-=UDF_PC_CONVERTSTANDARD(v, p, T, MW)
+=UDF_PC_CONVERTSTANDARD(volume_m3, pressure_Pa, temperature_K, molWeight)
 ```
 
 #### IdealGasLaw
@@ -5715,21 +5716,23 @@ n = IdealGasLaw(202650, 0.01, Empty, 298)  ' → ~0.818
 
 #### CompressFactorPR
 
-Calculates the Peng-Robinson equation of state compressibility factor Z. Requires critical temperature Tc (K), critical pressure Pc (kPa), and acentric factor omega.
+Calculates the Peng-Robinson equation of state compressibility factor Z. Requires critical temperature Tc (K), critical pressure Pc (Pa), and acentric factor omega.
 
 ```vb
 CompressFactorPR(P, T, Tc, Pc, omega) As Double
 ```
 
 ```vb
-Z = CompressFactorPR(1013.25, 300, 304.2, 7380, 0.225)  ' CO2 at 1 atm, 27°C
+Z = CompressFactorPR(101325, 300, 304.2, 7.38E+6, 0.225)  ' CO2 at 1 atm, 27°C
 ```
 
 **UDF Usage**
 ```
-=UDF_PC_COMPRESS(P, T, Tc, Pc, omega)
+=UDF_PC_COMPRESS(P, T, Tc, Pc)
 =UDF_PC_ZFACTOR(P, T, gasName)
 ```
+
+> `UDF_PC_COMPRESS` accepts only 4 arguments (omega comes from the built-in critical-constants table); use the VBA function `CompressFactorPR` for a custom omega.
 
 <a id="recipe-unit-conversion"></a>
 ### Recipe 15.3 — Unit Conversion
@@ -5767,14 +5770,14 @@ CylinderStdVolumeFromMass(netWt, gasFormula) As Double
 | Parameter | Type | Description |
 |------|------|------|
 | cylVol | Double | cylinder volume (L) |
-| fillP | Double | fill pressure (kPa) |
-| fillT | Double | Fill temperature (°C) |
+| fillP | Double | fill pressure (Pa) |
+| fillT | Double | Fill temperature (K) |
 | gasName | String | Gas name (e.g. "CO2", "N2", "O2") |
 | netWt | Double | cylinder net weight (kg) |
 | gasFormula | String | Chemical formula (e.g. "CO2", "N2") |
 
 ```vb
-V_std = CylinderStdVolume(40, 15000, 25, "N2")          ' 40L N2 Cylinder standard state volume
+V_std = CylinderStdVolume(40, 15E+6, 298.15, "N2")      ' 40L N2 cylinder, 15MPa, 25°C
 V_std = CylinderStdVolumeFromMass(25, "CO2")            ' 25kg CO2 Cylinder standard state volume
 ```
 

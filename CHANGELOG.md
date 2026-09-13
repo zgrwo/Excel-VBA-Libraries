@@ -2,6 +2,33 @@
 
 All notable changes to Excel VBA Libraries.
 
+## [Unreleased] — 2026-09-13
+
+### Fixed（第三轮全量深度审查修复批）
+
+- **JsonUtils**: 空 JSON 数组改返回已分配 0 长度数组（修复 `JsonStringify(JsonParse("[]"))`/`JsonGetKeys("[]")`/`JsonToRange "[]"`/`JsonGet("[]","[0]")` 全链路 Error 9）；`JsonStringify`/`UDF_JSON_STRINGIFY` 归一化 Range 输入（不再输出字面量 `"Range"`）；`JsonGet` 支持已解析 Dictionary 输入（parse-once/query-many）；字符串内未转义控制字符按 RFC 8259 §7 拒绝；指数溢出改模块错误码（`9e308` 不再裸 Error 6）
+- **StringUtils**: `TextJoin`/`UDF_STR_TEXTJOIN` 支持 2D 数组与 Range（修复 Error 9）；`HTMLDecode` 改单遍解码（修复 `&#38;lt;` → `<` 双重解码）；`RemoveChars`/`KeepChars` 主路径与回退路径统一为大小写敏感
+- **VariantKit**: `FilterPasses(Null,…,"isblank")` 不再 Error 94（Null 视为空白）；`ValuesEqual` 新增 Array/Object 分支（不再 CStr 崩溃）且数值容差改尺度感知（0 与 1E-13 不再判等）；`Compare` 混合数值/文本改类型秩排序（恢复传递性，修复 ArraySort 错序）；数组比较补第 2 维长度；测试 harness 失败不再被自身错误处理器吞没
+- **FileSystemUtils**: `ValidateSafePath` 统一分隔符后判定 UNC（修复 `/\server` 混合写法绕过）、拒绝通配符与 ADS；`FileExists`/`FolderExists`/`ListFiles`/`ListFolders`/`EnsureFolder` 接入安全检查；`ReadBinaryFile` 安全校验先于存在性探测；`WriteUTF8` 修复双 BOM 且 `bom=False` 生效；`UTF8DecodeBytes` 修复 minCp 残留导致 ASCII 变 U+FFFD；`WriteANSI` 失败不再静默
+- **SqlUtils**: `SqlRangeQuery` 文本列改 adVarWChar(32767)（修复 33 字符即整表失败）、类型推断改 VarType 白名单 + Date/Error 处理（不再把 `"01234"`/长 ID 转数值）、`SqlEscapeString(forLike)` 改 ACE 方括号转义（KI-009 重开）、Provider 回退链补 ACE 16 与位数提示、大小写重名表头按键去重、WHERE 词边界识别 + ORDER BY 明确拒绝、.xlam 默认改用活动工作簿
+- **LinearUtils**: `RangeToMatrix` 数组路径保持 2D 形状（修复 `UDF_LINALG_DET({1,2;3,4})` 等数组常量输入全线错误）；SVD 仅精确零列置零（不再截断 U 正交性）；LU 奇异判据改列范数相对尺度（高动态范围良态矩阵不再误判）；`PolyFit` 混基输入/行向量/负 degree 修复
+- **StatsUtils**: `TInv2T` 上界自适应（修复 df 小、alpha 小返回 ≈100）；`GammaLn` 负值反射取绝对值（修复 (-1,0) 区间裸 Error 5）；0 变差判定改偏差尺度（高偏置低变差数据不再误报零方差，同时保留小尺度支持）；`CorrelationMatrix` 无数值列改用 IsEmptyArray 探测
+- **RegressUtils**: `FitOLS`/`FitCoefOnly`/`TriangularInverse` 容差去除绝对下限（小尺度良态矩阵不再静默零系数）；`ANOVAOneWay` dfW=0 不再输出假显著；退化分类因子（全空/单水平）不再 Error 9；`FitOLS` 补欠定保护；`StandardizeColumns` 常量列判定改偏差尺度
+- **ArrayUtils**: `ArraySum`/`ArrayMin`/`ArrayMax`/`ArrayFind` 标量按单元素处理；`ArraySample(Array())` 空数组返回空；`ArrayFind` Error 值按错误码精确匹配
+- **XmlUtils**: `XmlGet` 不再吞解析错误；`XmlToRange` colNames 支持 2D 数组常量与 Range（修复手册示例必失败）
+- **RegexUtils**: `RegexFindInRange` 批次地址按 255 字符上限动态分批
+- **PhyChemUtils**: `IsUnknown` 支持参数省略（Missing）
+- **RangeUtils**: `SafeWriteValue` 合并单元格重定向后复查公式（不再静默覆盖锚点公式）；`RangeToJSON` 转义覆盖全部 <0x20 控制字符（RFC 8259）
+- **DateTimeUtils**: `Age` 的 `asOf` 支持日期序列号（不再静默改用今天）
+- **StatsUtils**: `TDistCDF` 补 df>0 域校验
+- **FileSystemUtils**: `CollectFolders` 枚举错误不再静默吞没（与 CollectFiles 一致）
+- **测试基建**: 交叉验证通过率剔除 SKIP 并输出 effective rate/NO RUNS；`run_all_tests` 注入改为守卫式（断言失败写 FAIL 行，不再静默）；`validate_docs` 计数头/AUTO_COUNTS 与锚点检查实做、`analyze_test_gaps` 跳过 skip 用例并将无覆盖模块判 FAIL；集成测试 `FitOLS` 用例修复数据别名；数组比较补形状断言；新增 20+ 条回归用例（JSON 负例探针、TextJoin 2D、HTMLDecode、Controls、TInv2T/GammaLn/高偏置、RangeToMatrix、FS 通配符/混合 UNC、Xml 2D colNames 等）
+
+### Changed
+
+- api-reference.md 补齐 `SqlEscapeString [forLike]`、`XmlGet/XmlGetAttr/XmlToRange [namespaces]` 签名；CN/EN 手册修正 PhyChem 单位（ConvertStandard m³/Pa/K、CylinderStdVolume Pa/K、CompressFactorPR Pa）、DilutionSolve/Density 未知项约定、MinMax 保留参数说明、JsonToRange 签名
+- sql-SKILL §10 补 ACE LIKE 方括号转义说明；AGENTS.md NormalizeInput 措辞与现状对齐；README.en/specification 版本号同步 2.1.1
+
 ## [2.1.1] — 2026-08-16
 
 ### Fixed

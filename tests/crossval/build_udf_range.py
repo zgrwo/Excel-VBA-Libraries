@@ -157,7 +157,21 @@ def run_test(xl, wb, test_case):
         ws.Delete()
 
 
+def _check_xlsm_freshness() -> None:
+    """Warn when docs/VBA_Libraries.xlsm predates src/ (binary rebuild required)."""
+    import glob
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    newest = 0.0
+    for pat in ("src/*.bas", "VBA-Core/*.cls"):
+        for path in glob.glob(os.path.join(root, pat)):
+            newest = max(newest, os.path.getmtime(path))
+    if os.path.exists(XLSM_PATH) and os.path.getmtime(XLSM_PATH) < newest:
+        print("  WARNING: docs/VBA_Libraries.xlsm is older than src/ — results may be "
+              "stale; run scripts/rebuild.ps1 to rebuild the workbook.")
+
+
 def main() -> int:
+    _check_xlsm_freshness()
     pythoncom.CoInitialize()
     xl = None
     try:

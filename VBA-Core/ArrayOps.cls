@@ -277,6 +277,13 @@ Public Function CollectNumericColumns(ByRef dataArr As Variant, _
 
     If vk Is Nothing Then Set vk = New VariantKit
 
+    ' numCols=0 时 ReDim colNames(1 To 0) 会抛 Error 9 — 先返回空结果
+    If numCols < 1 Then
+        Erase colMap
+        CollectNumericColumns = colMap
+        Exit Function
+    End If
+
     ReDim colNames(1 To numCols)
     numColsFound = 0
     If hasHeader Then firstDataRow = 2 Else firstDataRow = 1
@@ -512,7 +519,7 @@ Public Sub Test_ArrayOps()
     If Not (colMap(2) = 2) Then Err.Raise 5
     If Not (colMap(3) = 3) Then Err.Raise 5
 
-    If failCount > 0 Then Err.Raise 5, , "ArrayOps: " & failCount & " assertion(s) failed"
+    If failCount > 0 Then On Error GoTo 0: Err.Raise 5, , "ArrayOps: " & failCount & " assertion(s) failed"
     Exit Sub
 ErrHandler:
     If Err.Number = 5 Then

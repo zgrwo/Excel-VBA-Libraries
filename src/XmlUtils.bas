@@ -155,13 +155,8 @@ Public Function XmlGet(ByVal xml As Variant, ByVal xpath As String, _
     End If
     If Len(CStr(xml)) = 0 Then XmlGet = Empty: Exit Function
     Dim doc As Object
-    On Error Resume Next
+    ' 解析失败/COM 缺失必须上抛 (此前 Resume Next 吞错后静默返回 Empty)
     Set doc = GetDoc(CStr(xml), namespaces)
-    If doc Is Nothing Then
-        XmlGet = Empty
-        Exit Function
-    End If
-    On Error GoTo 0
     Dim node As Object
     On Error Resume Next
     Set node = doc.SelectSingleNode(xpath)
@@ -218,17 +213,66 @@ Public Function XmlToRange(ByVal xml As String, _
         Err.Raise ERR_XML_NOT_FOUND, "XmlToRange", "XPath 返回空节点集: " & rowXPath
     End If
 
-    ' 确定列名
+    ' 确定列名 (支持: 省略 / 标量 / 1D 数组 / 2D 数组常量 / Range)
     If IsMissing(colNames) Then
         nCols = DetectColumns(rows(0), cols)
+    ElseIf IsObject(colNames) Then
+        If TypeName(colNames) = "Range" Then
+            Dim rv As Variant: rv = colNames.Value
+            If Not IsArray(rv) Then
+                nCols = 1
+                ReDim cols(1 To 1): cols(1) = CStr(rv)
+            Else
+                Err.Clear: On Error Resume Next
+                Dim rvD2 As Long: rvD2 = UBound(rv, 2)
+                Dim rvIs2D As Boolean: rvIs2D = (Err.Number = 0)
+                On Error GoTo 0
+                If rvIs2D Then
+                    If UBound(rv, 1) = LBound(rv, 1) Then
+                        nCols = UBound(rv, 2) - LBound(rv, 2) + 1
+                        ReDim cols(1 To nCols)
+                        For i = 1 To nCols: cols(i) = CStr(rv(LBound(rv, 1), LBound(rv, 2) + i - 1)): Next
+                    Else
+                        nCols = UBound(rv, 1) - LBound(rv, 1) + 1
+                        ReDim cols(1 To nCols)
+                        For i = 1 To nCols: cols(i) = CStr(rv(LBound(rv, 1) + i - 1, LBound(rv, 2))): Next
+                    End If
+                Else
+                    nCols = UBound(rv) - LBound(rv) + 1
+                    ReDim cols(1 To nCols)
+                    lb = LBound(rv)
+                    For i = 1 To nCols: cols(i) = CStr(rv(lb + i - 1)): Next
+                End If
+            End If
+        Else
+            nCols = 1
+            ReDim cols(1 To 1): cols(1) = CStr(colNames)
+        End If
     ElseIf Not IsArray(colNames) Then
         nCols = 1
         ReDim cols(1 To 1): cols(1) = CStr(colNames)
     Else
-        nCols = UBound(colNames) - LBound(colNames) + 1
-        ReDim cols(1 To nCols)
-        lb = LBound(colNames)
-        For i = 1 To nCols: cols(i) = CStr(colNames(lb + i - 1)): Next
+        ' 1D 或 2D 数组常量 (Excel 传入 {"a","b"} 时为 1×2 2D Variant)
+        Err.Clear: On Error Resume Next
+        Dim cnD2 As Long: cnD2 = UBound(colNames, 2)
+        Dim cnIs2D As Boolean: cnIs2D = (Err.Number = 0)
+        On Error GoTo 0
+        If cnIs2D Then
+            If UBound(colNames, 1) = LBound(colNames, 1) Then
+                nCols = UBound(colNames, 2) - LBound(colNames, 2) + 1
+                ReDim cols(1 To nCols)
+                For i = 1 To nCols: cols(i) = CStr(colNames(LBound(colNames, 1), LBound(colNames, 2) + i - 1)): Next
+            Else
+                nCols = UBound(colNames, 1) - LBound(colNames, 1) + 1
+                ReDim cols(1 To nCols)
+                For i = 1 To nCols: cols(i) = CStr(colNames(LBound(colNames, 1) + i - 1, LBound(colNames, 2))): Next
+            End If
+        Else
+            nCols = UBound(colNames) - LBound(colNames) + 1
+            ReDim cols(1 To nCols)
+            lb = LBound(colNames)
+            For i = 1 To nCols: cols(i) = CStr(colNames(lb + i - 1)): Next
+        End If
     End If
     If nCols = 0 Then
         Err.Raise ERR_XML_NOT_FOUND, "XmlToRange", "未检测到任何列 — 行节点可能无子元素"

@@ -261,7 +261,7 @@ Public Sub Test_DictProxy()
     Set inner = Nothing: Set dict = Nothing
     Set dict1 = Nothing: Set dict2 = Nothing
 
-    If failCount > 0 Then Err.Raise 5, , "DictProxy: " & failCount & " assertion(s) failed"
+    If failCount > 0 Then On Error GoTo 0: Err.Raise 5, , "DictProxy: " & failCount & " assertion(s) failed"
     Exit Sub
 ErrHandler:
     If Err.Number = 5 Then

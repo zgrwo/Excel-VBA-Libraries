@@ -37,8 +37,10 @@ jobs:
           echo "✅ 全部 $count 个提交符合规范"
       - name: Run full static validation (4 layers)
         run: python tests/run_all_validation.py
-      - name: VBA lint (8 rules)
+      - name: VBA lint (10 rules)
         run: python scripts/vba_lint.py --summary
+      - name: API doc count header check
+        run: python scripts/generate_counts.py --check
       - name: Validate manual anchors
         run: python tests/utils/validate_manual_anchors.py
       # 文档链接一致性（Markdown 链接/反引号路径存在性，防文档漂移——2026-08 治理对齐）

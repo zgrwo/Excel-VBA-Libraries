@@ -1312,7 +1312,7 @@ TEST_CASES = [
         "name": "Coalesce_only_empty",
         "func": "Coalesce",
         "args": lambda: ("", ""),
-        "py_ref": lambda a: "",
+        "py_ref": lambda a: None,
         "result_type": "string",
     },
     {
@@ -1424,6 +1424,22 @@ TEST_CASES = [
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
+
+# 2026-09-13 回归: 2D/Range 输入、单遍实体解码、大小写敏感
+TEST_CASES += [
+    {"name": "TextJoin_2D_range", "func": "TextJoin",
+     "args": lambda: (",", [["a", "b"], ["c", "d"]]),
+     "py_ref": lambda a: "a,b,c,d", "result_type": "string"},
+    {"name": "HTMLDecode_no_double_decode", "func": "HTMLDecode",
+     "args": lambda: ("&#38;lt;",), "py_ref": lambda a: "&lt;", "result_type": "string"},
+    {"name": "HTMLDecode_amp_seq", "func": "HTMLDecode",
+     "args": lambda: ("&amp;amp; &lt;tag&gt;",), "py_ref": lambda a: "&amp; <tag>", "result_type": "string"},
+    {"name": "RemoveChars_case_sensitive", "func": "RemoveChars",
+     "args": lambda: ("aAbB", "a"), "py_ref": lambda a: "AbB", "result_type": "string"},
+    {"name": "KeepChars_case_sensitive", "func": "KeepChars",
+     "args": lambda: ("aAbB", "a"), "py_ref": lambda a: "a", "result_type": "string"},
+]
 
 
 def main() -> int:

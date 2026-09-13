@@ -232,6 +232,16 @@ Private Function BuildDesignMatrix(ByRef dataArr As Variant, _
                 p = p + 1
             Case "categorical"
                 catLevels = GetCategoricalLevels(dataArr, fCol, firstDataRow, lastDataRow)
+                ' 全空分类列: GetCategoricalLevels 返回未分配数组 → UBound 会 Error 9
+                Dim clbProbe As Long
+                Err.Clear: On Error Resume Next
+                clbProbe = LBound(catLevels)
+                If Err.Number <> 0 Then
+                    Err.Clear: On Error GoTo 0
+                    Err.Raise ERR_INVALID_DATA, "BuildDesignMatrix", _
+                        "列 " & fCol & " 无有效分类水平 (全空)。"
+                End If
+                On Error GoTo 0
                 If UBound(catLevels) - LBound(catLevels) + 1 > MAX_CATEGORICAL_LEVELS Then
                     Err.Raise ERR_INVALID_DATA, "BuildDesignMatrix", _
                         "列 " & fCol & " 的分类水平数 (" & (UBound(catLevels) - LBound(catLevels) + 1) & ") 超过上限 (" & MAX_CATEGORICAL_LEVELS & ")"
@@ -459,7 +469,7 @@ Private Function FitCoefOnly(ByRef X() As Double, ByRef y() As Double) As Double
         Next k
     Next
     rTol = maxAbsR * NUM_EPS * CDbl(p)
-    If rTol < RANK_TOL Then rTol = RANK_TOL
+    ' 纯相对容差 — 与 FitOLS 一致, 不再抬升到绝对 RANK_TOL
 
     ' 回代求解
     ReDim coef(1 To p)
@@ -468,7 +478,7 @@ Private Function FitCoefOnly(ByRef X() As Double, ByRef y() As Double) As Double
         For k = j + 1 To p
             s = s - R(rr0 + j - 1, rc0 + k - 1) * coef(k)
         Next
-        If Abs(R(rr0 + j - 1, rc0 + j - 1)) < rTol Then
+        If R(rr0 + j - 1, rc0 + j - 1) = 0# Or (rTol > 0# And Abs(R(rr0 + j - 1, rc0 + j - 1)) < rTol) Then
             coef(j) = 0#
         Else
             coef(j) = s / R(rr0 + j - 1, rc0 + j - 1)
@@ -504,10 +514,10 @@ Private Function TriangularInverse(ByRef R() As Double) As Double()
         End If
     Next
     rTol = maxDiag * NUM_EPS * CDbl(p)
-    If rTol < RANK_TOL Then rTol = RANK_TOL
+    ' 纯相对容差 — 避免小尺度良态矩阵的对角元被绝对下限清零
 
     For j = p To 1 Step -1
-        If Abs(R(rr0 + j - 1, rc0 + j - 1)) < rTol Then
+        If R(rr0 + j - 1, rc0 + j - 1) = 0# Or (rTol > 0# And Abs(R(rr0 + j - 1, rc0 + j - 1)) < rTol) Then
             Rinv(rr0 + j - 1, rc0 + j - 1) = 0#
         Else
             Rinv(rr0 + j - 1, rc0 + j - 1) = 1# / R(rr0 + j - 1, rc0 + j - 1)
@@ -562,6 +572,10 @@ Public Function FitOLS(ByRef X As Variant, ByRef y As Variant) As Object
 
     n = UBound(X, 1) - LBound(X, 1) + 1
     p = UBound(X, 2) - LBound(X, 2) + 1
+    If n < p Then
+        Err.Raise ERR_UNDERDETERM, "FitOLS", _
+            "样本数 (" & n & ") 少于参数数 (" & p & ")。"
+    End If
 
     ' 提取 Double 数组用于 QRDecomposition（要求 typed Double 参数）
     Dim Xqr() As Double, ri As Long, ci As Long
@@ -592,7 +606,7 @@ Public Function FitOLS(ByRef X As Variant, ByRef y As Variant) As Object
         Next k
     Next
     rTol = maxAbsR * NUM_EPS * CDbl(p)
-    If rTol < RANK_TOL Then rTol = RANK_TOL  ' 绝对下限
+    ' 纯相对容差 (无绝对下限): diag(1e-20) 等小尺度良态矩阵的系数不再被静默清零
 
     ' 通过回代求解 Rβ = Qᵀy
     ReDim coef(1 To p)
@@ -601,7 +615,7 @@ Public Function FitOLS(ByRef X As Variant, ByRef y As Variant) As Object
         For k = j + 1 To p
             s = s - R(rr0 + j - 1, rc0 + k - 1) * coef(k)
         Next
-        If Abs(R(rr0 + j - 1, rc0 + j - 1)) < rTol Then
+        If R(rr0 + j - 1, rc0 + j - 1) = 0# Or (rTol > 0# And Abs(R(rr0 + j - 1, rc0 + j - 1)) < rTol) Then
             coef(j) = 0#
         Else
             coef(j) = s / R(rr0 + j - 1, rc0 + j - 1)
@@ -763,7 +777,8 @@ Private Sub StandardizeColumns(ByRef X() As Double, ByRef means() As Double, ByR
         Else
             stds(j) = 1#
         End If
-        If stds(j) < RANK_TOL Then stds(j) = 1#
+        ' 常量列判定用偏差尺度 (高偏置常量列也识别); 不用绝对 RANK_TOL
+        If stds(j) <= RANK_TOL * (Abs(means(j)) + stds(j)) Then stds(j) = 1#
         For i = 1 To n: X(i, j) = (X(i, j) - means(j)) / stds(j): Next
     Next
 End Sub
@@ -992,11 +1007,13 @@ Public Function FactorImportance(ByVal data As Variant, _
                     End If
                 End If
             Next
-            fName = coefNames(LBound(coefNames) + CLng(dColsArr(LBound(dColsArr))) - 1)
-            If Not fImport.Exists(key) Then
-                fImport.Add key, maxAbs
-                fRawSum.Add key, rawBest
-                fNameMap.Add key, fName
+            If UBound(dColsArr) >= LBound(dColsArr) Then
+                fName = coefNames(LBound(coefNames) + CLng(dColsArr(LBound(dColsArr))) - 1)
+                If Not fImport.Exists(key) Then
+                    fImport.Add key, maxAbs
+                    fRawSum.Add key, rawBest
+                    fNameMap.Add key, fName
+                End If
             End If
         End If
     Next
@@ -1135,6 +1152,7 @@ Public Function InteractionEffects(ByVal data As Variant, _
         Set colInfo = factorMap(CStr(factorKeys(fkLb + fi - 1)))
         dCols = colInfo("design_cols")
         If Not IsArray(dCols) Then GoTo NextFi
+        If UBound(dCols) < LBound(dCols) Then GoTo NextFi  ' 单水平分类因子: 无哑变量列
         nColsA = UBound(dCols) - LBound(dCols) + 1
         ReDim colsA(1 To nColsA)
         For ci = 1 To nColsA
@@ -1145,6 +1163,7 @@ Public Function InteractionEffects(ByVal data As Variant, _
             Set colInfo = factorMap(CStr(factorKeys(fkLb + fj - 1)))
             dCols = colInfo("design_cols")
             If Not IsArray(dCols) Then GoTo NextFj
+            If UBound(dCols) < LBound(dCols) Then GoTo NextFj  ' 单水平分类因子
             nColsB = UBound(dCols) - LBound(dCols) + 1
             intCount = nColsA * nColsB
             If intCount > MAX_INTERACT_TERMS Then
@@ -1370,7 +1389,8 @@ Public Function ANOVAOneWay(ByVal data As Variant, _
     dfW = n - k
     dfT = n - 1
 
-    msb = 0#: msw = 0#: fStat = 0#: pVal = 0#
+    msb = 0#: msw = 0#: fStat = 0#: pVal = 1#
+    ' dfW<=0 (每组仅 1 个观测) 时没有残差自由度 — 不得输出 p=0 的假显著
     If dfW > 0 Then
         msb = ssb / dfB
         msw = ssw / dfW
@@ -1465,11 +1485,16 @@ Public Function LinearModelFit(ByVal data As Variant, _
         formula = "Y ~ "
     End If
     fn = dm("coef_names")
-    ReDim parts(1 To UBound(fn) - 1)
-    For fi = 2 To UBound(fn)
-        parts(fi - 1) = fn(LBound(fn) + fi - 1)
-    Next
-    formula = formula & Join(parts, " + ")
+    If UBound(fn) > LBound(fn) Then
+        ReDim parts(1 To UBound(fn) - LBound(fn))
+        For fi = LBound(fn) + 1 To UBound(fn)
+            parts(fi - LBound(fn)) = fn(fi)
+        Next
+        formula = formula & Join(parts, " + ")
+    Else
+        ' 仅截距模型 (所有因子为常量/单水平分类)
+        formula = formula & "(Intercept)"
+    End If
     model.Add "formula", formula
     ' 存储原始因子列顺序用于预测
     model.Add "factor_cols", factorCols

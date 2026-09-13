@@ -428,9 +428,10 @@ End Function
 ' 例如：DilutionSolve(2#, 10#, Empty, Empty) → #VALUE!（缺三项，无法求解）
 '       DilutionSolve(2#, 10#, Empty, 5#)    → 4（V₂=4 mL，即稀释到 4 mL）
 '       DilutionSolve(2#, 10#, 0.5, Empty)   → 40（V₂=40 mL）
-' 检测参数是否为待求解项 — Empty (VBA) 或 Null (COM None)
+' 检测参数是否为待求解项 — 省略 (Missing) / Empty (VBA) / Null (COM None)
+' 注意: 0 是有效数值, 不作为未知标记
 Private Function IsUnknown(ByVal v As Variant) As Boolean
-    IsUnknown = IsEmpty(v) Or IsNull(v)
+    IsUnknown = IsMissing(v) Or IsEmpty(v) Or IsNull(v)
 End Function
 
 Public Function DilutionSolve(ByVal c1 As Variant, ByVal v1 As Variant, _

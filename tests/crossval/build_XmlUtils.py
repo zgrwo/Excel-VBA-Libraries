@@ -332,6 +332,19 @@ TEST_CASES = [
 ]
 
 
+# 2026-09-13 回归: Excel 数组常量传入 colNames 时为 2D Variant
+TEST_CASES += [
+    {"name": "XmlToRange_2D_colnames", "func": "XmlToRange",
+     "args": lambda: (
+         "<rows><row><a>1</a><b>10</b></row><row><a>2</a><b>20</b></row></rows>",
+         "/rows/row",
+         [["a", "b"]],
+     ),
+     "py_ref": lambda a: [[1.0, 10.0], [2.0, 20.0]],
+     "result_type": "array", "tol": 1e-10},
+]
+
+
 def main() -> int:
     runner = CrossValRunner("XmlUtils", MODULE_PATHS)
     runner.run_all(TEST_CASES)

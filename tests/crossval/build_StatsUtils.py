@@ -219,7 +219,8 @@ TEST_CASES = [
     {"name": "ZTest_two_tail", "func": "ZTest",
      "args": lambda: ([1.0, 2.0, 3.0, 4.0, 5.0], 0.0, 2.0),
      "py_ref": lambda a: _py_ztest(a[0], a[1], a[2]),
-     "result_type": "scalar", "tol": 1e-6},
+     "result_type": "scalar", "tol": 1e-6,
+     "skip_if": not _HAS_SCIPY, "skip_reason": "scipy not installed"},
 
     # =====================================================================
     # Boundary / edge cases
@@ -402,6 +403,34 @@ def _py_ztest(data, mu0, sigma):
     z = (m - mu0) / (sigma / np.sqrt(n))
     from scipy import stats
     return 2.0 * (1.0 - stats.norm.cdf(abs(z)))
+
+# 2026-09-13 回归: 自适应 t 上界、GammaLn 负值反射、偏差尺度零变差判定
+if _HAS_SCIPY:
+    from scipy import special as _sp_special  # noqa: E402
+
+    TEST_CASES += [
+        {"name": "TInv2T_small_alpha", "func": "TInv2T",
+         "args": lambda: (0.001, 1),
+         "py_ref": lambda a: float(_sp_stats.t.ppf(1 - a[0] / 2, a[1])),
+         "result_type": "scalar", "tol": 1e-6},
+        {"name": "GammaLn_negative_half", "func": "GammaLn",
+         "args": lambda: (-0.5,),
+         "py_ref": lambda a: float(_sp_special.gammaln(-0.5)),
+         "result_type": "scalar", "tol": 1e-10},
+        {"name": "Correlation_high_offset", "func": "Correlation",
+         "args": lambda: ([1e13, 1e13 + 1, 1e13 + 2], [2e13, 2e13 + 2, 2e13 + 4]),
+         "py_ref": lambda a: float(np.corrcoef(a[0], a[1])[0, 1]),
+         "result_type": "scalar", "tol": 1e-10},
+        {"name": "Skewness_tiny_scale", "func": "Skewness",
+         "args": lambda: ([1e-16, 2e-16, 3e-16],),
+         "py_ref": lambda a: float(_sp_stats.skew(a[0], bias=False)),
+         "result_type": "scalar", "tol": 1e-8},
+        {"name": "ZScore_high_offset", "func": "ZScore",
+         "args": lambda: ([1e13, 1e13 + 1, 1e13 + 2], 1e13 + 2),
+         "py_ref": lambda a: 1.0,
+         "result_type": "scalar", "tol": 1e-10},
+    ]
+
 
 def main() -> int:
     runner = CrossValRunner("StatsUtils", MODULE_PATHS)

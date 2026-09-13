@@ -187,7 +187,22 @@ def check_function_counts():
             else:
                 result.add_pass()
 
-    # Cross-check: header total must equal sum of per-module counts
+    # Cross-check: header totals are owned by generate_counts.py (single source of
+    # truth). Delegate instead of re-parsing the header format here.
+    import subprocess
+    gen = ROOT / "scripts" / "generate_counts.py"
+    if gen.exists():
+        proc = subprocess.run(
+            [sys.executable, str(gen), "--check"],
+            capture_output=True, text=True, cwd=str(ROOT),
+        )
+        if proc.returncode == 0:
+            result.add_pass()
+        else:
+            tail = (proc.stdout or proc.stderr or "").strip().splitlines()[-2:]
+            result.add_fail("generate_counts --check: " + " | ".join(tail))
+    else:
+        result.add_fail("scripts/generate_counts.py not found")
     header_match = re.search(
         r'\*\*Total public functions\*\*:\s*(\d+)\s*\|\s*\*\*Total UDFs\*\*:\s*(\d+)',
         api_text
@@ -341,12 +356,26 @@ def check_section_refs():
 
 
 def check_api_manual_anchors():
-    """Delegate to existing anchor validator for User Manual."""
+    """Run the manual anchor validator (delegated script) for real.
+
+    Previously a no-op PASS; now executes tests/utils/validate_manual_anchors.py
+    so a missing/broken validator cannot silently report success.
+    """
+    import subprocess
     result = CheckResult()
-    # This check is handled by tests/utils/validate_manual_anchors.py
-    # which correctly handles combined headings like "#### FuncA / FuncB"
-    # and both GitHub/VS Code anchor styles.
-    result.add_pass()
+    script = ROOT / "tests" / "utils" / "validate_manual_anchors.py"
+    if not script.exists():
+        result.add_fail("validate_manual_anchors.py not found")
+        return result
+    proc = subprocess.run(
+        [sys.executable, str(script)],
+        capture_output=True, text=True, cwd=str(ROOT),
+    )
+    if proc.returncode == 0:
+        result.add_pass()
+    else:
+        tail = (proc.stdout or proc.stderr or "").strip().splitlines()[-3:]
+        result.add_fail("manual anchors: " + " | ".join(tail))
     return result
 
 
@@ -357,11 +386,15 @@ def check_no_stale_markers():
     for path in [API_DOC, USER_MANUAL, USER_MANUAL_EN]:
         text = _load(path)
         if not text:
+            result.add_fail(f"{path.name}: file not found")
             continue
+        found_any = False
         for pattern in STALE_MARKER_PATTERNS:
             for m in re.finditer(pattern, text):
                 result.add_fail(f"{path.name}: stale marker '{m.group(0).strip()}'")
-        result.add_pass()
+                found_any = True
+        if not found_any:
+            result.add_pass()
     return result
 
 
@@ -370,7 +403,7 @@ def check_en_no_chinese():
     result = CheckResult()
     text = _load(USER_MANUAL_EN)
     if not text:
-        result.add_pass()
+        result.add_fail(f"{USER_MANUAL_EN.name}: file not found")
         return result
 
     for i, line in enumerate(text.splitlines(), 1):
@@ -537,20 +570,26 @@ def check_deprecated_in_use():
         if not text:
             continue
         for m in re.finditer(r"^' @deprecated\b.*", text, re.MULTILINE):
-            # Look for the function name on the next line
-            next_line_start = m.end()
-            next_line = text[next_line_start:next_line_start + 200].split('\n')[0]
-            func_match = re.search(r'(?:Function|Sub|Property)\s+(\w+)', next_line)
+            # Scan forward to the first real declaration (skip comment lines)
+            body = text[m.end():]
+            func_match = re.search(
+                r"(?m)^\s*(?:Public|Private|Friend)?\s*"
+                r"(?:Function|Sub|Property\s+(?:Get|Let|Set))\s+(\w+)",
+                body,
+            )
             if func_match:
                 deprecated[func_match.group(1)] = cls.stem
 
-    # Check all .bas and .cls files for references to deprecated symbols
+    # Check all .bas and .cls files for references to deprecated symbols.
+    # KNOWN_LEGITIMATE_WRAPPERS documents accepted consumers (e.g. JsonUtils.VarLetSet).
     for src_path in list(_all_bas_files()) + list(_all_cls_files()):
         text = _load(src_path)
         if not text:
             continue
         name = src_path.stem
         for symbol, dep_file in deprecated.items():
+            if symbol in KNOWN_LEGITIMATE_WRAPPERS:
+                continue  # documented legitimate consumer
             if name == dep_file:
                 continue  # skip the defining file itself
             if re.search(rf'\b{symbol}\b', text):

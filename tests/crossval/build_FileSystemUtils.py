@@ -236,6 +236,31 @@ TEST_CASES = [
      "py_ref": lambda a: "C:\\Data", "result_type": "string"},
 ]
 
+# 2026-09-13 回归: 通配符拒绝 / 混合分隔符 UNC 拒绝
+def _fs_error_probe(excel, wb, ws, runner, tc, args):
+    _ensure_probe_module(wb,
+        "Public Function ProbePath(ByVal p As String) As Long\r\n"
+        "    On Error GoTo EH\r\n"
+        "    Dim x() As Byte\r\n"
+        "    x = ReadBinaryFile(p)\r\n"
+        "    ProbePath = 0\r\n"
+        "    Exit Function\r\n"
+        "EH: ProbePath = Err.Number\r\n"
+        "End Function")
+    err_num = run_macro(excel, wb, "FSProbe.ProbePath", args[0])
+    return float(err_num), -2147220502.0, 0.0  # ERR_INVALID_INPUT = vbObjectError + 1002
+
+
+TEST_CASES += [
+    {"name": "ReadBinaryFile_wildcard_rejected", "func": "ReadBinaryFile",
+     "args": lambda: (os.path.join(_tmp_dir, "*.txt"),),
+     "reconstruct": _fs_error_probe, "py_ref": lambda a: -2147220502.0},
+    {"name": "ReadBinaryFile_mixed_sep_unc_rejected", "func": "ReadBinaryFile",
+     "args": lambda: ("/\\server/share/x",),
+     "reconstruct": _fs_error_probe, "py_ref": lambda a: -2147220502.0},
+]
+
+
 def main() -> int:
     try:
         runner = CrossValRunner("FileSystemUtils", MODULE_PATHS)

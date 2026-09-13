@@ -13,5 +13,6 @@ if [ ! -f "$CHECKER" ]; then
     exit 0
 fi
 
-python "$CHECKER"
-exit $?
+python "$CHECKER" || exit $?
+python "$REPO_ROOT/scripts/generate_counts.py" --check || exit $?
+exit 0

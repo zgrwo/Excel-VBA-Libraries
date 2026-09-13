@@ -44,7 +44,11 @@ VBA_BUILTINS = {
 }
 
 def crossval_funcs(mod):
-    """Return set of 'func' values in build_<mod>.py"""
+    """Return set of 'func' values for ACTIVE (non-skipped) cases in build_<mod>.py.
+
+    Skipped cases do not count as coverage: a module whose cases are all
+    skip_if must not appear as covered.
+    """
     fs = set()
     for f in os.listdir(CV):
         low = f.lower()
@@ -52,8 +56,15 @@ def crossval_funcs(mod):
         if low.startswith("build_") and mlow in low:
             path = os.path.join(CV, f)
             with open(path, encoding="utf-8") as fh:
-                for m in re.finditer(r'"func":\s*"(\w+)"', fh.read()):
-                    fs.add(m.group(1))
+                content = fh.read()
+            # Each case dict starts with "name"; split on that boundary.
+            chunks = re.split(r'\{\s*"name"\s*:', content)[1:]
+            for chunk in chunks:
+                if re.search(r'"skip_if"\s*:\s*True', chunk):
+                    continue
+                fm = re.search(r'"func"\s*:\s*"(\w+)"', chunk)
+                if fm:
+                    fs.add(fm.group(1))
     return fs
 
 def analyze(mod):
@@ -89,17 +100,17 @@ if __name__ == "__main__":
     if target:
         mods = [m for m in mods if target.lower() in m.lower()]
     done = []; pending = []; total_uncovered = 0; total_lines = 0
+    no_coverage = set()
     for mod in mods:
         info = analyze(mod)
         if not info["has_test"]:
-            # Module has no VBA Test_* — check if crossval covers it
+            # Module has no VBA Test_* — check if active crossval covers it
             cv = crossval_funcs(mod)
             if cv:
-                print(f"  {mod:20s}  migrated   (0 VBA Test lines, {len(cv)} crossval funcs)")
+                print(f"  {mod:20s}  migrated   (0 VBA Test lines, {len(cv)} active crossval funcs)")
             else:
-                print(f"  {mod:20s}  NO TESTS   (no VBA Test_* and no crossval coverage)")
-                if ci_mode:
-                    all_uncovered = [mod]
+                print(f"  {mod:20s}  NO TESTS   (no VBA Test_* and no active crossval coverage)")
+                no_coverage.add(mod)
             done.append(mod); continue
         n = len(info["uncovered"])
         total_uncovered += n; total_lines += info["lines"]
@@ -116,14 +127,25 @@ if __name__ == "__main__":
         #   "result"  — captured from `result = Func(...)` patterns
         #   "Len"     — ambiguous with `Len()` builtin in test assertions
         #   "Range"   — Excel Range object references
-        #   Test_SqlUtils / SqlRangeQuery — ADODB-only, cannot be COM-tested
-        WHITELIST = {"Len","Range","result","Test_SqlUtils","SqlRangeQuery"}
+        # SqlUtils functions are ADODB/file-backed: their crossval cases are
+        # skip_if (cannot run without a saved workbook) and are covered by the
+        # in-Excel VBA Test_SqlUtils suite instead.
+        WHITELIST = {"Len", "Range", "result", "Test_SqlUtils",
+                     "SqlRangeQuery", "SqlQuery", "SqlListSheets", "SqlListColumns",
+                     "SqlJoin", "SqlGroupBy", "SqlExecute", "SqlGetConnection",
+                     "SqlEscapeString", "SqlGetSheetColumns", "SqlGetNamedRanges"}
         all_uncovered = set()
         for m in mods:
             info = analyze(m)
             if info.get("uncovered"):
                 all_uncovered.update(f for f in info["uncovered"] if f not in WHITELIST)
+        failed = False
         if all_uncovered:
             print(f"  CI FAIL: unexpected uncovered functions: {sorted(all_uncovered)}")
+            failed = True
+        if no_coverage:
+            print(f"  CI FAIL: modules with no tests and no active crossval: {sorted(no_coverage)}")
+            failed = True
+        if failed:
             sys.exit(1)
         print("  CI PASS: no unexpected coverage gaps")

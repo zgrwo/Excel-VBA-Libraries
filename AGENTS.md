@@ -122,7 +122,7 @@ ExcelVBA函数库/
 | 原则 | 核心 |
 | :--- | :--- |
 | **静默传播阻断** | 显式守卫 `NaN`/`Inf`/`Null`/`Empty`，不兜底（数值类 UDF 返回 `CVErr(xlErrNum)` 哨兵，0 是有效值） |
-| **防御完整性** | 安全机制覆盖模块所有方法（路径验证 / 超时 / 参数化；VBA 侧入口统一走 VariantKit.NormalizeInput） |
+| **防御完整性** | 安全机制覆盖模块所有方法（路径验证 / 超时 / 参数化；新代码优先使用 VariantKit.NormalizeInput，存量分批迁移；Public 函数必须显式处理 Range 与 Variant 数组双路径） |
 | **异常过滤器** | 统一排除不可恢复异常；`On Error Resume Next` 必须检查 `Err.Number`（见 context.md 反模式条目） |
 
 ### 7. 闭环验证强制

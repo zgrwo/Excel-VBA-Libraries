@@ -795,26 +795,34 @@ Public Function RegexFindInRange( _
     If apIdx > 0 Then
         ReDim Preserve addrParts(0 To apIdx - 1)
         Dim ws As Worksheet: Set ws = rng.Parent
-        If apIdx <= BATCH_SIZE Then
-            Set RegexFindInRange = ws.Range(Join(addrParts, ","))
-        Else
-            Set batchResult = Nothing
-            For batchStart = 0 To apIdx - 1 Step BATCH_SIZE
-                batchEnd = batchStart + BATCH_SIZE - 1
-                If batchEnd >= apIdx Then batchEnd = apIdx - 1
-                ReDim batchParts(0 To batchEnd - batchStart)
-                For bIdx = batchStart To batchEnd
-                    batchParts(bIdx - batchStart) = addrParts(bIdx)
-                Next bIdx
-                batchAddr = Join(batchParts, ",")
-                If batchResult Is Nothing Then
-                    Set batchResult = ws.Range(batchAddr)
-                Else
-                    Set batchResult = Application.Union(batchResult, ws.Range(batchAddr))
-                End If
-            Next batchStart
-            Set RegexFindInRange = batchResult
-        End If
+        ' Excel Range("addr") 文本上限 255 字符 — 按累计长度动态分批
+        Dim segStart As Long, segLen As Long, bi As Long, kk As Long
+        Dim segAddr As String, segRng As Range
+        Set batchResult = Nothing
+        segStart = 0: segLen = 0
+        For bi = 0 To apIdx - 1
+            Dim aLen As Long: aLen = Len(addrParts(bi))
+            If bi > segStart And segLen + 1 + aLen > 250 Then
+                segAddr = ""
+                For kk = segStart To bi - 1
+                    If Len(segAddr) > 0 Then segAddr = segAddr & ","
+                    segAddr = segAddr & addrParts(kk)
+                Next kk
+                Set segRng = ws.Range(segAddr)
+                If batchResult Is Nothing Then Set batchResult = segRng Else Set batchResult = Application.Union(batchResult, segRng)
+                segStart = bi: segLen = 0
+            End If
+            If segLen > 0 Then segLen = segLen + 1
+            segLen = segLen + aLen
+        Next bi
+        segAddr = ""
+        For kk = segStart To apIdx - 1
+            If Len(segAddr) > 0 Then segAddr = segAddr & ","
+            segAddr = segAddr & addrParts(kk)
+        Next kk
+        Set segRng = ws.Range(segAddr)
+        If batchResult Is Nothing Then Set batchResult = segRng Else Set batchResult = Application.Union(batchResult, segRng)
+        Set RegexFindInRange = batchResult
     Else
         Set RegexFindInRange = Nothing
     End If

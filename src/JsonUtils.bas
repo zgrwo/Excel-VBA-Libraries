@@ -176,7 +176,6 @@ End Function
 ' ParseArray — 解析 JSON 数组 → Variant Array
 Private Function ParseArray(ByRef st As TJsonState) As Variant
     Dim items() As Variant
-    Dim emptyArr() As Variant
     Dim cnt As Long
     Dim cap As Long
 
@@ -194,9 +193,10 @@ Private Function ParseArray(ByRef st As TJsonState) As Variant
     SkipWhitespace st
     If PeekChar(st) = "]" Then
         ReadChar st
-        ' Return uninitialized empty array — safer than Split(vbNullString)
-        ' (Split(vbNullString) relies on undocumented behavior, LBound/UBound may vary by host)
-        ParseArray = emptyArr
+        ' Empty array: return an allocated 0-length Variant array (LBound=0, UBound=-1)
+        ' so every consumer can use LBound/UBound safely. Uninitialized arrays
+        ' (Dim a()) raise Error 9 on UBound and must never be returned.
+        ParseArray = Array()
         st.depth = st.depth - 1
         Exit Function
     End If
@@ -221,7 +221,7 @@ Private Function ParseArray(ByRef st As TJsonState) As Variant
         ReDim Preserve items(0 To cnt - 1)
         ParseArray = items
     Else
-        ParseArray = emptyArr
+        ParseArray = Array()
     End If
     st.depth = st.depth - 1
 End Function
@@ -249,6 +249,10 @@ Private Function ParseString(ByRef st As TJsonState) As String
                 Exit Function
             Case 92 ' \
                 Exit Do
+            Case 0 To 31
+                ' RFC 8259 §7: raw control characters must be escaped
+                Err.Raise ERR_INVALID_JSON, "JsonUtils", _
+                    "JSON 语法错误: 字符串含未转义控制字符 (位置 " & st.pos & ")"
         End Select
         st.pos = st.pos + 1
     Loop
@@ -332,6 +336,10 @@ Private Function ParseString(ByRef st As TJsonState) As String
                         "JSON 语法错误: 位置 " & (st.pos - 1) & " 无效的转义字符 \" & c
             End Select
         Else
+            If AscW(c) < 32 Then
+                Err.Raise ERR_INVALID_JSON, "JsonUtils", _
+                    "JSON 语法错误: 字符串含未转义控制字符 (位置 " & (st.pos - 1) & ")"
+            End If
             parts(pIdx) = c
             pIdx = pIdx + 1
         End If
@@ -432,8 +440,23 @@ Private Function ParseNumber(ByRef st As TJsonState) As Variant
         End If
         If exponent < -324# Then
             ParseNumber = 0#  ' 下溢为零 (与 Double 行为一致)
+        ElseIf mantissa = 0# Then
+            ParseNumber = 0#
         Else
+            ' 溢出守卫: 对数预检 (阈值贴近 log10(DBL_MAX)=308.2547) +
+            ' 乘法错误捕获兜底。只查 exponent 会漏掉 9e308; 阈值过严会误杀 DBL_MAX。
+            If Log(Abs(mantissa)) / Log(10#) + exponent > 308.255 Then
+                Err.Raise ERR_INVALID_JSON, "JsonUtils", _
+                    "JSON 数字超出 Double 范围: " & numStr
+            End If
+            On Error Resume Next
             ParseNumber = mantissa * (10# ^ exponent)
+            If Err.Number <> 0 Then
+                Err.Clear: On Error GoTo 0
+                Err.Raise ERR_INVALID_JSON, "JsonUtils", _
+                    "JSON 数字超出 Double 范围: " & numStr
+            End If
+            On Error GoTo 0
         End If
     ElseIf InStr(numStr, ".") > 0 Then
         ParseNumber = Val(numStr)
@@ -513,15 +536,30 @@ Public Function JsonGet(ByVal json As Variant, ByVal path As Variant) As Variant
     If IsObject(path) Then
         If TypeOf path Is Range Then path = CStr(path.Value)
     End If
+    Dim current As Variant
+    ' Already-parsed Dictionary input: use directly (supports parse-once/query-many).
     If IsObject(json) Then
-        If TypeOf json Is Range Then json = json.Value
+        If TypeOf json Is Range Then
+            json = json.Value
+        Else
+            Set current = json
+        End If
     End If
     If IsArray(json) Then
+        Dim firstCell As Variant
         On Error Resume Next
-        json = json(LBound(json, 1), LBound(json, 2))
+        firstCell = json(LBound(json, 1), LBound(json, 2))
+        If Err.Number <> 0 Then
+            Err.Clear: On Error GoTo 0
+            Err.Raise ERR_INVALID_JSON, "JsonUtils", _
+                "JSON 输入是数组 — 请传入 JSON 字符串或已解析的 Dictionary。"
+        End If
         On Error GoTo 0
+        json = firstCell
     End If
-    Dim current As Variant
+    If Not IsObject(current) Then
+        VarLetSet current, JsonParse(CStr(json))
+    End If
     Dim p       As Long
     Dim c       As String
     Dim brEnd   As Long
@@ -529,8 +567,6 @@ Public Function JsonGet(ByVal json As Variant, ByVal path As Variant) As Variant
     Dim dotPos  As Long
     Dim brkPos  As Long
     Dim segEnd  As Long
-
-    VarLetSet current, JsonParse(json)
 
     p = 1
     Do While p <= Len(path)
@@ -569,9 +605,20 @@ Public Function JsonGet(ByVal json As Variant, ByVal path As Variant) As Variant
                         "无效的数组索引 [" & seg & "] — 需要非负整数"
                 End If
                 Dim idx As Long: idx = CLng(idxD)
-                If idx > UBound(current) Then
+                ' Safe UBound probe: empty arrays (from "[]") return an allocated
+                ' 0-length array → UBound = -1, index out of range.
+                Dim ub As Long
+                Err.Clear: On Error Resume Next
+                ub = UBound(current)
+                If Err.Number <> 0 Then
+                    Err.Clear: On Error GoTo 0
                     Err.Raise ERR_PATH_NOT_FOUND, "JsonUtils", _
-                        "数组索引 [" & seg & "] 越界 (上界 " & UBound(current) & ")"
+                        "数组为空 — 索引 [" & seg & "] 越界"
+                End If
+                On Error GoTo 0
+                If idx > ub Then
+                    Err.Raise ERR_PATH_NOT_FOUND, "JsonUtils", _
+                        "数组索引 [" & seg & "] 越界 (上界 " & ub & ")"
                 End If
                 VarLetSet current, current(idx)
             End If
@@ -713,6 +760,11 @@ Public Function JsonGetKeys(ByVal json As Variant) As String()
     If IsArray(root) Then
         Dim ai As Long, alo As Long, ahi As Long
         alo = LBound(root): ahi = UBound(root)
+        If ahi < alo Then
+            ' Empty JSON array → unallocated String() (callers must probe)
+            JsonGetKeys = result
+            Exit Function
+        End If
         ReDim result(alo To ahi) As String
         For ai = alo To ahi
             result(ai) = CStr(ai)
@@ -767,6 +819,10 @@ End Function
 '   - 空值 / 未初始化 → null
 '=====================================================================
 Public Function JsonStringify(ByVal value As Variant) As String
+    ' Range → its 2D Value array (dual-path contract, same as JsonGet/JsonGetKeys)
+    If IsObject(value) Then
+        If TypeOf value Is Range Then value = value.Value
+    End If
     JsonStringify = StringifyValue(value, 0)
 End Function
 
@@ -955,7 +1011,16 @@ Public Function UDF_JSON_KEYS(ByVal json As Variant) As Variant
         UDF_JSON_KEYS = CVErr(xlErrNA)
         Exit Function
     End If
-    n = UBound(keys) - LBound(keys) + 1
+    Dim keysLb As Long
+    Err.Clear: On Error Resume Next
+    keysLb = LBound(keys)
+    If Err.Number <> 0 Then
+        Err.Clear: On Error GoTo 0
+        UDF_JSON_KEYS = CVErr(xlErrNA)
+        Exit Function
+    End If
+    On Error GoTo 0
+    n = UBound(keys) - keysLb + 1
     If n <= 0 Then
         UDF_JSON_KEYS = CVErr(xlErrNA)
         Exit Function
